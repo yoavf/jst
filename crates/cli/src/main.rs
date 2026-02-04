@@ -7,6 +7,7 @@ use crossterm::{
 };
 use jst_shared::{TranslateRequest, TranslateResponse};
 use std::io::{stdout, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -25,10 +26,11 @@ struct AppState {
     last_input_time: Instant,
     last_translated_input: String,
     has_translation_line: bool,
+    prompt: String,
 }
 
 impl AppState {
-    fn new() -> Self {
+    fn new(prompt: String) -> Self {
         Self {
             input: String::new(),
             cursor_pos: 0,
@@ -38,23 +40,48 @@ impl AppState {
             last_input_time: Instant::now(),
             last_translated_input: String::new(),
             has_translation_line: false,
+            prompt,
         }
+    }
+}
+
+/// Try to get a shell-like prompt
+fn get_prompt() -> String {
+    // Try to get username and current directory for a realistic prompt
+    let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+    let home = std::env::var("HOME").unwrap_or_default();
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "~".to_string());
+
+    // Replace home with ~
+    let cwd_display = if !home.is_empty() && cwd.starts_with(&home) {
+        cwd.replacen(&home, "~", 1)
+    } else {
+        cwd
+    };
+
+    // Detect shell style
+    let shell = std::env::var("SHELL").unwrap_or_default();
+    if shell.contains("zsh") {
+        format!("{}@{} ", user, cwd_display)
+    } else {
+        format!("{}:{}$ ", user, cwd_display)
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let state = Arc::new(Mutex::new(AppState::new()));
+    let prompt = get_prompt();
+    let state = Arc::new(Mutex::new(AppState::new(prompt)));
+    let needs_render = Arc::new(AtomicBool::new(true));
 
     // Setup terminal - stay inline, just enable raw mode
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
 
-    // Initial render
-    render(&mut *state.lock().await, &mut stdout)?;
-
     // Main loop
-    let result = run_loop(state.clone()).await;
+    let result = run_loop(state.clone(), needs_render).await;
 
     // Cleanup: clear our lines and restore terminal
     {
@@ -115,13 +142,16 @@ fn cleanup(state: &AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn std::error::Error>> {
+async fn run_loop(
+    state: Arc<Mutex<AppState>>,
+    needs_render: Arc<AtomicBool>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let mut stdout = stdout();
     let client = reqwest::Client::new();
     let mut last_poll = Instant::now();
 
     loop {
-        // Poll for events with a short timeout for responsive spinner
+        // Poll for events with a short timeout for responsive updates
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key_event) = event::read()? {
                 let mut state_guard = state.lock().await;
@@ -139,7 +169,7 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
                     }
                 }
 
-                render(&mut *state_guard, &mut stdout)?;
+                needs_render.store(true, Ordering::SeqCst);
             }
         }
 
@@ -161,11 +191,13 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
                 state_guard.is_translating = true;
                 state_guard.last_translated_input = state_guard.input.clone();
                 let input = state_guard.input.trim().to_string();
+                needs_render.store(true, Ordering::SeqCst);
                 drop(state_guard);
 
                 // Spawn translation task
                 let state_clone = state.clone();
                 let client_clone = client.clone();
+                let needs_render_clone = needs_render.clone();
                 tokio::spawn(async move {
                     let result = translate(&client_clone, &input).await;
                     let mut state_guard = state_clone.lock().await;
@@ -176,18 +208,26 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
                             state_guard.translation = translation;
                         }
                     }
+                    // Signal that we need to render the result
+                    needs_render_clone.store(true, Ordering::SeqCst);
                 });
             }
         }
 
-        // Update spinner
+        // Update spinner and render
         if last_poll.elapsed() >= Duration::from_millis(80) {
             let mut state_guard = state.lock().await;
             if state_guard.is_translating {
                 state_guard.spinner_frame = (state_guard.spinner_frame + 1) % SPINNER_FRAMES.len();
-                render(&mut *state_guard, &mut stdout)?;
+                needs_render.store(true, Ordering::SeqCst);
             }
             last_poll = Instant::now();
+        }
+
+        // Render if needed
+        if needs_render.swap(false, Ordering::SeqCst) {
+            let mut state_guard = state.lock().await;
+            render(&mut *state_guard, &mut stdout)?;
         }
     }
 }
@@ -265,11 +305,11 @@ fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn s
         Clear(ClearType::CurrentLine),
     )?;
 
-    // Render prompt with subtle color
+    // Render shell-like prompt + input
     execute!(
         stdout,
         SetForegroundColor(Color::DarkGrey),
-        Print("› "),
+        Print(&state.prompt),
         ResetColor,
         Print(&state.input),
     )?;
@@ -314,8 +354,8 @@ fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn s
         state.has_translation_line = false;
     }
 
-    // Position cursor on input line (2 for "› ")
-    let cursor_col = 2 + state.cursor_pos as u16;
+    // Position cursor on input line (prompt length + cursor position)
+    let cursor_col = state.prompt.len() as u16 + state.cursor_pos as u16;
     execute!(stdout, MoveToColumn(cursor_col))?;
 
     stdout.flush()?;
