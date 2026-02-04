@@ -1,9 +1,9 @@
 use crossterm::{
-    cursor::{self, MoveTo},
+    cursor::{MoveToColumn, MoveUp},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     style::{Color, Print, ResetColor, SetForegroundColor},
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{self, Clear, ClearType},
 };
 use jst_shared::{TranslateRequest, TranslateResponse};
 use std::io::{stdout, Write};
@@ -24,6 +24,7 @@ struct AppState {
     spinner_frame: usize,
     last_input_time: Instant,
     last_translated_input: String,
+    has_translation_line: bool,
 }
 
 impl AppState {
@@ -36,6 +37,7 @@ impl AppState {
             spinner_frame: 0,
             last_input_time: Instant::now(),
             last_translated_input: String::new(),
+            has_translation_line: false,
         }
     }
 }
@@ -44,30 +46,72 @@ impl AppState {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(Mutex::new(AppState::new()));
 
-    // Setup terminal
+    // Setup terminal - stay inline, just enable raw mode
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::Show)?;
 
     // Initial render
-    render(&*state.lock().await, &mut stdout)?;
+    render(&mut *state.lock().await, &mut stdout)?;
 
     // Main loop
     let result = run_loop(state.clone()).await;
 
-    // Cleanup
+    // Cleanup: clear our lines and restore terminal
+    {
+        let state_guard = state.lock().await;
+        cleanup(&*state_guard, &mut stdout)?;
+    }
     terminal::disable_raw_mode()?;
-    execute!(stdout, LeaveAlternateScreen)?;
 
-    // If we have a command to execute, print and run it
+    // Execute the command seamlessly
     if let Ok(Some(command)) = result {
-        println!("$ {}", command);
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .status()?;
+        // Print the command as if user typed it, then execute
+        println!("{}", command);
+        stdout.flush()?;
+
+        // Use exec to replace this process with the command
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .exec();
+            // If exec fails, fall back to spawn
+            eprintln!("exec failed: {}", err);
+        }
+
+        #[cfg(not(unix))]
+        {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .status()?;
+        }
     }
 
+    Ok(())
+}
+
+fn cleanup(state: &AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
+    // Clear the input line
+    execute!(
+        stdout,
+        MoveToColumn(0),
+        Clear(ClearType::CurrentLine),
+    )?;
+
+    // If we had a translation line, clear it too
+    if state.has_translation_line {
+        execute!(
+            stdout,
+            Print("\n"),
+            Clear(ClearType::CurrentLine),
+            MoveUp(1),
+        )?;
+    }
+
+    stdout.flush()?;
     Ok(())
 }
 
@@ -95,7 +139,7 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
                     }
                 }
 
-                render(&*state_guard, &mut stdout)?;
+                render(&mut *state_guard, &mut stdout)?;
             }
         }
 
@@ -105,14 +149,18 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
             let now = Instant::now();
             let elapsed = now.duration_since(state_guard.last_input_time);
 
+            // Trim for comparison to avoid re-translating on trailing spaces
+            let trimmed_input = state_guard.input.trim();
+            let trimmed_last = state_guard.last_translated_input.trim();
+
             if elapsed >= Duration::from_millis(DEBOUNCE_MS)
-                && !state_guard.input.is_empty()
-                && state_guard.input != state_guard.last_translated_input
+                && !trimmed_input.is_empty()
+                && trimmed_input != trimmed_last
                 && !state_guard.is_translating
             {
                 state_guard.is_translating = true;
                 state_guard.last_translated_input = state_guard.input.clone();
-                let input = state_guard.input.clone();
+                let input = state_guard.input.trim().to_string();
                 drop(state_guard);
 
                 // Spawn translation task
@@ -123,8 +171,8 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
                     let mut state_guard = state_clone.lock().await;
                     state_guard.is_translating = false;
                     if let Ok(translation) = result {
-                        // Only update if input hasn't changed
-                        if state_guard.last_translated_input == input {
+                        // Only update if input hasn't changed significantly
+                        if state_guard.last_translated_input.trim() == input {
                             state_guard.translation = translation;
                         }
                     }
@@ -137,7 +185,7 @@ async fn run_loop(state: Arc<Mutex<AppState>>) -> Result<Option<String>, Box<dyn
             let mut state_guard = state.lock().await;
             if state_guard.is_translating {
                 state_guard.spinner_frame = (state_guard.spinner_frame + 1) % SPINNER_FRAMES.len();
-                render(&*state_guard, &mut stdout)?;
+                render(&mut *state_guard, &mut stdout)?;
             }
             last_poll = Instant::now();
         }
@@ -209,56 +257,66 @@ fn handle_key_event(event: KeyEvent, state: &mut AppState) -> KeyAction {
     }
 }
 
-fn render(state: &AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
-    // Clear screen and move to top
+fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
+    // Move to start of current line and clear it
     execute!(
         stdout,
-        MoveTo(0, 0),
-        Clear(ClearType::All),
+        MoveToColumn(0),
+        Clear(ClearType::CurrentLine),
     )?;
 
-    // Render prompt line
+    // Render prompt with subtle color
     execute!(
         stdout,
-        SetForegroundColor(Color::Green),
+        SetForegroundColor(Color::DarkGrey),
         Print("› "),
         ResetColor,
         Print(&state.input),
     )?;
 
-    // Render translation line
-    execute!(stdout, MoveTo(0, 1))?;
+    // Render translation line below
+    let show_translation = state.is_translating || !state.translation.is_empty();
 
-    if state.is_translating {
-        let spinner = SPINNER_FRAMES[state.spinner_frame];
+    if show_translation {
+        // Move to next line
+        execute!(stdout, Print("\n"), MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+
+        if state.is_translating {
+            let spinner = SPINNER_FRAMES[state.spinner_frame];
+            execute!(
+                stdout,
+                SetForegroundColor(Color::DarkGrey),
+                Print(format!("  {} ", spinner)),
+                ResetColor,
+            )?;
+        } else {
+            execute!(
+                stdout,
+                SetForegroundColor(Color::Cyan),
+                Print("  ⮑ "),
+                Print(&state.translation),
+                ResetColor,
+            )?;
+        }
+
+        // Move back up to input line
+        execute!(stdout, MoveUp(1))?;
+        state.has_translation_line = true;
+    } else if state.has_translation_line {
+        // Clear the old translation line if it existed
         execute!(
             stdout,
-            SetForegroundColor(Color::DarkGrey),
-            Print(format!("  {} translating...", spinner)),
-            ResetColor,
+            Print("\n"),
+            MoveToColumn(0),
+            Clear(ClearType::CurrentLine),
+            MoveUp(1),
         )?;
-    } else if !state.translation.is_empty() {
-        execute!(
-            stdout,
-            SetForegroundColor(Color::Cyan),
-            Print("  ⮑ "),
-            Print(&state.translation),
-            ResetColor,
-        )?;
+        state.has_translation_line = false;
     }
 
-    // Render help line
-    execute!(
-        stdout,
-        MoveTo(0, 3),
-        SetForegroundColor(Color::DarkGrey),
-        Print("Enter: execute  |  Esc: quit  |  Tab: edit translation"),
-        ResetColor,
-    )?;
-
-    // Position cursor on input line
-    let cursor_col = 2 + state.cursor_pos as u16; // 2 for "› "
-    execute!(stdout, MoveTo(cursor_col, 0))?;
+    // Position cursor on input line (2 for "› ")
+    let cursor_col = 2 + state.cursor_pos as u16;
+    execute!(stdout, MoveToColumn(cursor_col))?;
 
     stdout.flush()?;
     Ok(())
