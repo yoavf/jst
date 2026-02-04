@@ -19,7 +19,7 @@ Developers (and especially those who work across many tools/frameworks) constant
 › compress the logs folder into a tarball
   ⮑ tar -czf logs.tar.gz logs/
 
-› kill whatever is running on port 3000  
+› kill whatever is running on port 3000
   ⮑ lsof -ti:3000 | xargs kill -9
 ```
 
@@ -53,15 +53,28 @@ jst find all png files modified today
 ### Model: Ministral 8B
 
 - Fast, accurate for constrained code-generation tasks
-- Default backend is hosted (Mistral API), managed by us
+- Served via Mistral API, proxied through our own backend
 - Future: add BYOK (bring your own key) and local inference options
 
-### Inference Backend (v1 — simplified)
+### Backend Architecture (v1 — simplified)
 
-For v1, the only backend is **Mistral API (Ministral 8B)** hosted by us, proxied through a jst API endpoint. This keeps things dead simple: install → works.
+```
+jst CLI binary → jst API proxy → Mistral API (Ministral 8B)
+```
+
+The **jst API proxy** is a lightweight service (Cloudflare Worker or Fly.io) that:
+- Holds the Mistral API key (never shipped in the binary, never exposed to users)
+- Receives `{input, device_hash, project_context}` from the CLI
+- Checks rate limits and daily usage caps against the device hash
+- Calls Mistral API with the system prompt + project context + user input
+- Returns the translated command
+
+This proxy is where all freemium logic lives: device fingerprint tracking, daily counters, and future GitHub auth. The CLI itself has zero secrets — it just hits our endpoint.
+
+**Why not OpenRouter?** Not needed yet — we're only using one model. If we ever want model flexibility or provider fallbacks, we swap the proxy's upstream from Mistral to OpenRouter in one line. That's a backend change, invisible to users.
 
 Future backends (not v1):
-- BYOK: Anthropic, Groq, OpenAI, Mistral direct
+- BYOK: Anthropic, Groq, OpenAI, Mistral direct (user provides their own key, CLI calls provider directly, bypasses our proxy entirely)
 - Local: Ollama, or bundled GGUF via llama.cpp bindings
 - Self-hosted: for enterprise/air-gapped environments
 
@@ -77,7 +90,7 @@ Future backends (not v1):
 - Hardware ID only (no hostname/username/OS — those change too easily and weaken the fingerprint)
 - Rate limiting by IP + device hash at the proxy level
 - VMs/containers will regenerate machine-id — acceptable, falls through to "just auth with GitHub"
-- Determined abuse is fine — the economics work even with some gaming. A single GPU-hosted Ministral 8B costs fractions of a cent per translation
+- Determined abuse is fine — the economics work even with some gaming. Ministral 8B via Mistral API costs fractions of a cent per translation
 
 ## Project Context Detection
 
