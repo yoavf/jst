@@ -1,0 +1,15 @@
+[package]
+name = "jst-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "jst"
+path = "src/main.rs"
+
+[dependencies]
+jst-shared = { path = "../shared" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
