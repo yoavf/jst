@@ -28,7 +28,10 @@ struct Choice {
     message: Message,
 }
 
-pub async fn translate(api_key: &str, req: &TranslateRequest) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn translate(
+    api_key: &str,
+    req: &TranslateRequest,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
 
     let system_prompt = build_system_prompt(
