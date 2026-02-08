@@ -6,6 +6,8 @@ use crossterm::{
     terminal::{self, Clear, ClearType},
 };
 use jst_shared::{TranslateRequest, TranslateResponse};
+mod cache;
+use cache::PersistentCache;
 use std::io::{stdout, Write};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,6 +41,8 @@ struct AppState {
     last_nl_input: String,
     status_msg: String,
     request_context: Option<String>,
+    session_cache: std::collections::HashMap<String, String>,
+    persistent_cache: PersistentCache,
 }
 
 impl AppState {
@@ -59,6 +63,8 @@ impl AppState {
             last_nl_input: String::new(),
             status_msg: String::new(),
             request_context: None,
+            session_cache: std::collections::HashMap::new(),
+            persistent_cache: PersistentCache::load(),
         }
     }
 }
@@ -266,6 +272,15 @@ async fn run_loop(
                 match handle_key_event(key_event, &mut state_guard) {
                     KeyAction::Continue => {}
                     KeyAction::Execute(command) => {
+                        if !command.starts_with("# ") {
+                            let nl_input = state_guard.last_nl_input.trim().to_string();
+                            if !nl_input.is_empty() {
+                                state_guard
+                                    .session_cache
+                                    .insert(nl_input.clone(), command.clone());
+                                state_guard.persistent_cache.insert(&nl_input, &command);
+                            }
+                        }
                         return Ok(Some(command));
                     }
                     KeyAction::Quit => {
@@ -309,7 +324,8 @@ async fn run_loop(
                 let client_clone = client.clone();
                 let needs_render_clone = needs_render.clone();
                 tokio::spawn(async move {
-                    let result = translate(&client_clone, &input, context).await;
+                    let result =
+                        translate(&client_clone, &input, context, state_clone.clone()).await;
                     let mut state_guard = state_clone.lock().await;
                     state_guard.is_translating = false;
                     if let Ok(translation) = result {
@@ -352,7 +368,20 @@ enum KeyAction {
 fn handle_key_event(event: KeyEvent, state: &mut AppState) -> KeyAction {
     match event.code {
         KeyCode::Esc => {
-            if state.mode == InputMode::Command {
+            if !state.input.is_empty() {
+                state.input.clear();
+                state.cursor_pos = 0;
+                state.last_input_time = Instant::now();
+                if state.mode == InputMode::Natural {
+                    state.translation.clear();
+                    state.last_translated_input.clear();
+                    state.last_nl_input.clear();
+                    state.last_translation = None;
+                    state.request_context = None;
+                }
+                set_status_for_mode(state);
+                KeyAction::Continue
+            } else if state.mode == InputMode::Command {
                 state.mode = InputMode::Natural;
                 state.input = state.last_nl_input.clone();
                 state.cursor_pos = state.input.len();
@@ -407,7 +436,10 @@ fn handle_key_event(event: KeyEvent, state: &mut AppState) -> KeyAction {
             KeyAction::Continue
         }
         KeyCode::Char('r') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            if state.mode == InputMode::Natural {
+            if state.mode == InputMode::Natural
+                && !state.translation.is_empty()
+                && !state.translation.starts_with("# ")
+            {
                 if let Some(prev) = state.last_translation.clone() {
                     state.request_context =
                         Some(format!("previous_translation_rejected: {}", prev));
@@ -476,14 +508,41 @@ fn handle_key_event(event: KeyEvent, state: &mut AppState) -> KeyAction {
 }
 
 fn set_status_for_mode(state: &mut AppState) {
-    state.status_msg = match state.mode {
+    state.status_msg.clear();
+}
+
+fn status_parts(state: &AppState) -> Vec<(String, bool)> {
+    let trimmed_input = state.input.trim();
+    let translation_ready = !state.translation.is_empty() && !state.translation.starts_with("# ");
+
+    let mut parts: Vec<(String, bool)> = Vec::new();
+
+    match state.mode {
         InputMode::Natural => {
-            "ENTER run • CTRL+R regenerate • TAB accept cmd • ESC quit".to_string()
+            parts.push(("ENTER run".to_string(), translation_ready));
+            parts.push(("TAB accept cmd".to_string(), translation_ready));
+            parts.push(("CTRL+R regenerate".to_string(), translation_ready));
+            if trimmed_input.is_empty() {
+                parts.push(("ESC quit".to_string(), true));
+            } else {
+                parts.push(("ESC clear".to_string(), true));
+            }
         }
         InputMode::Command => {
-            "ENTER run edited cmd • ESC back to natural • CTRL+C quit".to_string()
+            parts.push((
+                "ENTER run edited cmd".to_string(),
+                !trimmed_input.is_empty(),
+            ));
+            if trimmed_input.is_empty() {
+                parts.push(("ESC back to natural".to_string(), true));
+            } else {
+                parts.push(("ESC clear".to_string(), true));
+            }
+            parts.push(("CTRL+C quit".to_string(), true));
         }
-    };
+    }
+
+    parts
 }
 
 fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
@@ -529,11 +588,38 @@ fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn s
         stdout,
         Print("\n"),
         MoveToColumn(0),
-        Clear(ClearType::CurrentLine),
-        SetForegroundColor(Color::DarkGrey),
-        Print(&state.status_msg),
-        ResetColor,
+        Clear(ClearType::CurrentLine)
     )?;
+    if !state.status_msg.is_empty() {
+        execute!(
+            stdout,
+            SetForegroundColor(Color::DarkGrey),
+            Print(&state.status_msg),
+            ResetColor,
+        )?;
+    } else {
+        let parts = status_parts(state);
+        for (idx, (text, active)) in parts.into_iter().enumerate() {
+            if idx > 0 {
+                execute!(
+                    stdout,
+                    SetForegroundColor(Color::DarkGrey),
+                    Print(" • "),
+                    ResetColor
+                )?;
+            }
+            if active {
+                execute!(stdout, ResetColor, Print(text))?;
+            } else {
+                execute!(
+                    stdout,
+                    SetForegroundColor(Color::DarkGrey),
+                    Print(text),
+                    ResetColor
+                )?;
+            }
+        }
+    }
 
     // Move back up to input line
     execute!(stdout, MoveUp(2))?;
@@ -550,7 +636,22 @@ async fn translate(
     client: &reqwest::Client,
     input: &str,
     context: Option<String>,
+    state: Arc<Mutex<AppState>>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    {
+        let mut state_guard = state.lock().await;
+        if let Some(cmd) = state_guard.session_cache.get(input) {
+            return Ok(cmd.clone());
+        }
+        if let Some(cmd) = state_guard.persistent_cache.get(input) {
+            let cmd_clone = cmd.clone();
+            state_guard
+                .session_cache
+                .insert(input.to_string(), cmd_clone.clone());
+            return Ok(cmd_clone);
+        }
+    }
+
     let request = TranslateRequest {
         input: input.to_string(),
         context,
@@ -562,7 +663,12 @@ async fn translate(
 
     if response.status().is_success() {
         let translate_response: TranslateResponse = response.json().await?;
-        Ok(translate_response.command)
+        let command = translate_response.command;
+        let mut state_guard = state.lock().await;
+        state_guard
+            .session_cache
+            .insert(input.to_string(), command.clone());
+        Ok(command)
     } else {
         Ok("# unable to translate".to_string())
     }

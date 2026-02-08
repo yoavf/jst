@@ -14,3 +14,4 @@ serde_json.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 crossterm = "0.28"
+dirs = "5"
