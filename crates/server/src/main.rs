@@ -9,12 +9,13 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-mod mistral;
+mod openrouter;
 
 use jst_shared::{ErrorResponse, TranslateRequest, TranslateResponse};
 
 struct AppState {
-    mistral_api_key: String,
+    openrouter_api_key: String,
+    openrouter_model: String,
 }
 
 #[tokio::main]
@@ -26,10 +27,15 @@ async fn main() {
         )
         .init();
 
-    let mistral_api_key =
-        std::env::var("MISTRAL_API_KEY").expect("MISTRAL_API_KEY environment variable must be set");
+    let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
+        .expect("OPENROUTER_API_KEY environment variable must be set");
+    let openrouter_model = std::env::var("OPENROUTER_MODEL")
+        .unwrap_or_else(|_| "qwen/qwen2.5-coder-7b-instruct".to_string());
 
-    let state = Arc::new(AppState { mistral_api_key });
+    let state = Arc::new(AppState {
+        openrouter_api_key,
+        openrouter_model,
+    });
 
     let app = Router::new()
         .route("/", get(health))
@@ -57,7 +63,7 @@ async fn translate(
 ) -> impl IntoResponse {
     info!("Translate request: {:?}", req.input);
 
-    match mistral::translate(&state.mistral_api_key, &req).await {
+    match openrouter::translate(&state.openrouter_api_key, &state.openrouter_model, &req).await {
         Ok(command) => {
             info!("Translated to: {:?}", command);
             (StatusCode::OK, Json(TranslateResponse { command })).into_response()

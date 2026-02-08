@@ -1,8 +1,7 @@
 use jst_shared::{build_system_prompt, TranslateRequest};
 use serde::{Deserialize, Serialize};
 
-const MISTRAL_API_URL: &str = "https://api.mistral.ai/v1/chat/completions";
-const MODEL: &str = "ministral-8b-latest";
+const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -30,6 +29,7 @@ struct Choice {
 
 pub async fn translate(
     api_key: &str,
+    model: &str,
     req: &TranslateRequest,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
@@ -41,7 +41,7 @@ pub async fn translate(
     );
 
     let chat_request = ChatRequest {
-        model: MODEL.to_string(),
+        model: model.to_string(),
         messages: vec![
             Message {
                 role: "system".to_string(),
@@ -57,7 +57,7 @@ pub async fn translate(
     };
 
     let response = client
-        .post(MISTRAL_API_URL)
+        .post(OPENROUTER_API_URL)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&chat_request)
@@ -67,7 +67,7 @@ pub async fn translate(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("Mistral API error: {} - {}", status, body).into());
+        return Err(format!("OpenRouter API error: {} - {}", status, body).into());
     }
 
     let chat_response: ChatResponse = response.json().await?;

@@ -32,7 +32,7 @@ jst/
         routes.rs               # POST /translate endpoint
         ratelimit.rs            # device hash tracking, daily counters, tier enforcement
         device_auth.rs          # hardware ID validation, GitHub OAuth device flow
-        mistral.rs              # upstream Mistral API client (holds the API key)
+        openrouter.rs           # upstream OpenRouter API client (holds the API key)
 
     shared/                     # library crate used by both CLI and server
       Cargo.toml
@@ -164,12 +164,12 @@ The CLI calls this to generate the hash. The server imports the same module to u
 
 ### server crate — thin proxy
 
-- Holds the Mistral API key (via env var, never in code)
+- Holds the OpenRouter API key (via env var, never in code)
 - Single endpoint: `POST /translate`
 - Rate limiting: tracks `device_hash → daily_count` in Redis (or in-memory for dev)
 - Tiers: anonymous (50/day by device hash), authenticated (200/day by GitHub user ID)
 - GitHub OAuth device flow for authentication upgrade
-- Forwards request to Mistral API with constructed system prompt
+- Forwards request to OpenRouter API with constructed system prompt
 - Returns translated command + remaining quota
 
 ## Build & Run
@@ -182,7 +182,7 @@ cargo build --workspace
 cargo run -p jst-cli
 
 # run server locally
-MISTRAL_API_KEY=... cargo run -p jst-server
+OPENROUTER_API_KEY=... OPENROUTER_MODEL=qwen/qwen2.5-coder-7b-instruct cargo run -p jst-server
 
 # test everything
 cargo test --workspace
@@ -201,5 +201,5 @@ cargo build -p jst-cli --release
 
 - **Shared types = compile-time API contract.** Change a field in `TranslateRequest` and both sides fail to compile until they agree. No integration surprises.
 - **Prompt logic in shared.** The system prompt is critical to output quality. Having it in one place means improvements benefit both the hosted service and future BYOK mode.
-- **Open source everything.** Users can audit exactly what the CLI sends and what the server does with it. The only secret is the Mistral API key, which lives in the server's environment, never in code.
+- **Open source everything.** Users can audit exactly what the CLI sends and what the server does with it. The only secret is the OpenRouter API key, which lives in the server's environment, never in code.
 - **Independent deployment.** CLI and server have different release cadences. CLI ships when UX changes. Server ships when proxy logic changes. Workspace handles this naturally.

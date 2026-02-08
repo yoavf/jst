@@ -50,28 +50,28 @@ jst find all png files modified today
 - Installs via Homebrew (macOS), scoop/winget (Windows)
 - The bottleneck is always inference latency, never the CLI itself
 
-### Model: Ministral 8B
+### Model: Qwen 2.5 Coder 7B Instruct
 
 - Fast, accurate for constrained code-generation tasks
-- Served via Mistral API, proxied through our own backend
+- Served via OpenRouter, proxied through our own backend
 - Future: add BYOK (bring your own key) and local inference options
 
 ### Backend Architecture (v1 — simplified)
 
 ```
-jst CLI binary → jst API proxy → Mistral API (Ministral 8B)
+jst CLI binary → jst API proxy → OpenRouter (Qwen 2.5 Coder 7B Instruct)
 ```
 
 The **jst API proxy** is a lightweight service (Cloudflare Worker or Fly.io) that:
-- Holds the Mistral API key (never shipped in the binary, never exposed to users)
+- Holds the OpenRouter API key (never shipped in the binary, never exposed to users)
 - Receives `{input, device_hash, project_context}` from the CLI
 - Checks rate limits and daily usage caps against the device hash
-- Calls Mistral API with the system prompt + project context + user input
+- Calls OpenRouter API with the system prompt + project context + user input
 - Returns the translated command
 
 This proxy is where all freemium logic lives: device fingerprint tracking, daily counters, and future GitHub auth. The CLI itself has zero secrets — it just hits our endpoint.
 
-**Why not OpenRouter?** Not needed yet — we're only using one model. If we ever want model flexibility or provider fallbacks, we swap the proxy's upstream from Mistral to OpenRouter in one line. That's a backend change, invisible to users.
+**Why OpenRouter?** Single integration with access to multiple models, easy to swap or A/B models without changing the client.
 
 Future backends (not v1):
 - BYOK: Anthropic, Groq, OpenAI, Mistral direct (user provides their own key, CLI calls provider directly, bypasses our proxy entirely)
@@ -90,7 +90,7 @@ Future backends (not v1):
 - Hardware ID only (no hostname/username/OS — those change too easily and weaken the fingerprint)
 - Rate limiting by IP + device hash at the proxy level
 - VMs/containers will regenerate machine-id — acceptable, falls through to "just auth with GitHub"
-- Determined abuse is fine — the economics work even with some gaming. Ministral 8B via Mistral API costs fractions of a cent per translation
+- Determined abuse is fine — the economics work even with some gaming. OpenRouter pricing keeps per-translation cost low
 
 ## Project Context Detection
 
@@ -149,7 +149,7 @@ Plus dynamic project context appended per-request.
 src/
   main.rs          # CLI entry, arg parsing (clap)
   shell.rs         # Interactive input loop — crossterm raw mode, rendering, key handling
-  translator.rs    # Trait-based translation — currently just MistralTranslator
+  translator.rs    # Trait-based translation — currently just OpenRouterTranslator
   config.rs        # ~/.jst/config.toml loading/saving
   context.rs       # Project context auto-detection + .jst.ctx parsing
 ```

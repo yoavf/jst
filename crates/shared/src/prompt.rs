@@ -1,6 +1,6 @@
 pub fn build_system_prompt(context: Option<&str>, os: Option<&str>, shell: Option<&str>) -> String {
     let mut prompt = String::from(
-        r#"You are a CLI command translator. Convert natural language into executable shell commands.
+        r#"You are a CLI command translator. Convert natural language into a single executable shell command.
 
 Rules:
 - Output ONLY the shell command, nothing else. No explanation, no markdown, no backticks.
