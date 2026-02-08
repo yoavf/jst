@@ -7,6 +7,7 @@ use crossterm::{
 };
 use jst_shared::{TranslateRequest, TranslateResponse};
 use std::io::{stdout, Write};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -71,7 +72,26 @@ fn get_prompt() -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Non-interactive mode: translate and run immediately when args are provided
+    if !args.is_empty() {
+        let input = args.join(" ");
+        let client = reqwest::Client::new();
+        let translation = translate(&client, &input).await?;
+
+        if translation.is_empty() || translation.starts_with("# ") {
+            eprintln!("{}", translation);
+            return Ok(());
+        }
+
+        println!("{}", translation);
+        stdout().flush()?;
+        execute_command(&translation)?;
+        return Ok(());
+    }
+
     let prompt = get_prompt();
     let state = Arc::new(Mutex::new(AppState::new(prompt)));
     let needs_render = Arc::new(AtomicBool::new(true));
@@ -96,37 +116,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", command);
         stdout.flush()?;
 
-        // Use exec to replace this process with the command
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            let err = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&command)
-                .exec();
-            // If exec fails, fall back to spawn
-            eprintln!("exec failed: {}", err);
-        }
-
-        #[cfg(not(unix))]
-        {
-            std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&command)
-                .status()?;
-        }
+        execute_command(&command)?;
     }
 
     Ok(())
 }
 
-fn cleanup(state: &AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
+fn cleanup(
+    state: &AppState,
+    stdout: &mut impl Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Clear the input line
-    execute!(
-        stdout,
-        MoveToColumn(0),
-        Clear(ClearType::CurrentLine),
-    )?;
+    execute!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine),)?;
 
     // If we had a translation line, clear it too
     if state.has_translation_line {
@@ -299,11 +300,7 @@ fn handle_key_event(event: KeyEvent, state: &mut AppState) -> KeyAction {
 
 fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     // Move to start of current line and clear it
-    execute!(
-        stdout,
-        MoveToColumn(0),
-        Clear(ClearType::CurrentLine),
-    )?;
+    execute!(stdout, MoveToColumn(0), Clear(ClearType::CurrentLine),)?;
 
     // Render shell-like prompt + input
     execute!(
@@ -319,7 +316,12 @@ fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn s
 
     if show_translation {
         // Move to next line
-        execute!(stdout, Print("\n"), MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+        execute!(
+            stdout,
+            Print("\n"),
+            MoveToColumn(0),
+            Clear(ClearType::CurrentLine)
+        )?;
 
         if state.is_translating {
             let spinner = SPINNER_FRAMES[state.spinner_frame];
@@ -362,7 +364,10 @@ fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn s
     Ok(())
 }
 
-async fn translate(client: &reqwest::Client, input: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+async fn translate(
+    client: &reqwest::Client,
+    input: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let request = TranslateRequest {
         input: input.to_string(),
         context: None,
@@ -370,11 +375,7 @@ async fn translate(client: &reqwest::Client, input: &str) -> Result<String, Box<
         shell: std::env::var("SHELL").ok(),
     };
 
-    let response = client
-        .post(API_URL)
-        .json(&request)
-        .send()
-        .await?;
+    let response = client.post(API_URL).json(&request).send().await?;
 
     if response.status().is_success() {
         let translate_response: TranslateResponse = response.json().await?;
@@ -382,4 +383,20 @@ async fn translate(client: &reqwest::Client, input: &str) -> Result<String, Box<
     } else {
         Ok("# unable to translate".to_string())
     }
+}
+
+fn execute_command(command: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = Command::new("sh").arg("-c").arg(command).exec();
+        eprintln!("exec failed: {}", err);
+    }
+
+    #[cfg(not(unix))]
+    {
+        Command::new("sh").arg("-c").arg(command).status()?;
+    }
+
+    Ok(())
 }

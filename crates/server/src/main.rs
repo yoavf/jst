@@ -26,8 +26,8 @@ async fn main() {
         )
         .init();
 
-    let mistral_api_key = std::env::var("MISTRAL_API_KEY")
-        .expect("MISTRAL_API_KEY environment variable must be set");
+    let mistral_api_key =
+        std::env::var("MISTRAL_API_KEY").expect("MISTRAL_API_KEY environment variable must be set");
 
     let state = Arc::new(AppState { mistral_api_key });
 
