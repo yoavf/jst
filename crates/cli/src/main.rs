@@ -1,5 +1,5 @@
 use crossterm::{
-    cursor::{MoveToColumn, MoveUp},
+    cursor::{MoveDown, MoveToColumn, MoveUp},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     style::{Color, Print, ResetColor, SetForegroundColor},
@@ -33,6 +33,7 @@ struct AppState {
     last_input_time: Instant,
     last_translated_input: String,
     prompt: String,
+    prompt_width: usize,
     mode: InputMode,
     last_translation: Option<String>,
     last_nl_input: String,
@@ -42,6 +43,7 @@ struct AppState {
 
 impl AppState {
     fn new(prompt: String) -> Self {
+        let prompt_width = visible_len(&prompt);
         Self {
             input: String::new(),
             cursor_pos: 0,
@@ -51,6 +53,7 @@ impl AppState {
             last_input_time: Instant::now(),
             last_translated_input: String::new(),
             prompt,
+            prompt_width,
             mode: InputMode::Natural,
             last_translation: None,
             last_nl_input: String::new(),
@@ -63,7 +66,11 @@ impl AppState {
 /// Try to reuse the user's shell prompt and add a jst marker.
 fn get_prompt() -> String {
     if let Some(shell_prompt) = detect_prompt() {
-        return format!("[jst] {}", shell_prompt);
+        let mut p = format!("[jst] {}", shell_prompt);
+        if !p.ends_with(' ') {
+            p.push(' ');
+        }
+        return p;
     }
 
     // Fallback synthetic prompt
@@ -86,10 +93,28 @@ fn get_prompt() -> String {
         format!("{}:{}$ ", user, cwd_display)
     };
 
-    format!("[jst] {}", base)
+    let mut p = format!("[jst] {}", base);
+    if !p.ends_with(' ') {
+        p.push(' ');
+    }
+    p
 }
 
 fn detect_prompt() -> Option<String> {
+    // Prefer inherited env when jst is launched from an interactive shell
+    if let Ok(env_prompt) = std::env::var("PROMPT") {
+        let trimmed = env_prompt.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if let Ok(env_ps1) = std::env::var("PS1") {
+        let trimmed = env_ps1.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
     let shell = std::env::var("SHELL").ok()?;
     let shell_name = std::path::Path::new(&shell)
         .file_name()
@@ -97,15 +122,14 @@ fn detect_prompt() -> Option<String> {
         .unwrap_or("");
 
     if shell_name.contains("zsh") {
-        if let Ok(out) = Command::new("zsh")
-            .arg("-lc")
-            .arg("print -r -- $PROMPT")
-            .output()
-        {
-            if out.status.success() {
-                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !s.is_empty() {
-                    return Some(s);
+        // Prefer prompt-expanded form (%F, %~ etc.) via print -P; fall back to raw
+        for cmd in ["print -P -- \"$PROMPT\"", "print -r -- $PROMPT"] {
+            if let Ok(out) = Command::new("zsh").arg("-ic").arg(cmd).output() {
+                if out.status.success() {
+                    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !s.is_empty() {
+                        return Some(s);
+                    }
                 }
             }
         }
@@ -127,6 +151,32 @@ fn detect_prompt() -> Option<String> {
     }
 
     None
+}
+
+fn visible_len(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut count = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b {
+            // Skip ANSI escape sequence: ESC [
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'[' {
+                i += 1;
+                while i < bytes.len() {
+                    let b = bytes[i];
+                    i += 1;
+                    if (0x40..=0x7e).contains(&b) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            count += 1;
+            i += 1;
+        }
+    }
+    count
 }
 
 #[tokio::main]
@@ -166,8 +216,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Execute the command seamlessly
     if let Ok(Some(command)) = result {
-        // Print the command as if user typed it, then execute
-        println!("{}", command);
+        // Show the command that will run (keep translation line style), then execute
+        println!("⮑ {}", command);
         stdout.flush()?;
 
         execute_command(&command)?;
@@ -180,17 +230,19 @@ fn cleanup(
     _state: &AppState,
     stdout: &mut impl Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Clear input + translation + status lines
+    // Clear input + translation + status lines without adding blank lines
     execute!(
         stdout,
         MoveToColumn(0),
         Clear(ClearType::CurrentLine),
-        Print("\n"),
+        MoveDown(1),
         MoveToColumn(0),
         Clear(ClearType::CurrentLine),
-        Print("\n"),
+        MoveDown(1),
         MoveToColumn(0),
-        Clear(ClearType::CurrentLine)
+        Clear(ClearType::CurrentLine),
+        MoveUp(2),
+        MoveToColumn(0),
     )?;
 
     stdout.flush()?;
@@ -487,7 +539,7 @@ fn render(state: &mut AppState, stdout: &mut impl Write) -> Result<(), Box<dyn s
     execute!(stdout, MoveUp(2))?;
 
     // Position cursor on input line (prompt length + cursor position)
-    let cursor_col = state.prompt.len() as u16 + state.cursor_pos as u16;
+    let cursor_col = state.prompt_width as u16 + state.cursor_pos as u16;
     execute!(stdout, MoveToColumn(cursor_col))?;
 
     stdout.flush()?;
