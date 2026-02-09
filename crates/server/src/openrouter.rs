@@ -56,6 +56,12 @@ pub async fn translate(
         max_tokens: 500,
     };
 
+    if dev_log_enabled() {
+        if let Ok(payload) = serde_json::to_string_pretty(&chat_request) {
+            tracing::info!("JST_DEV_LOG outbound OpenRouter request:\n{}", payload);
+        }
+    }
+
     let response = client
         .post(OPENROUTER_API_URL)
         .header("Authorization", format!("Bearer {}", api_key))
@@ -64,13 +70,22 @@ pub async fn translate(
         .send()
         .await?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+
+    if dev_log_enabled() {
+        tracing::info!(
+            "JST_DEV_LOG inbound OpenRouter response (status={}):\n{}",
+            status,
+            body
+        );
+    }
+
+    if !status.is_success() {
         return Err(format!("OpenRouter API error: {} - {}", status, body).into());
     }
 
-    let chat_response: ChatResponse = response.json().await?;
+    let chat_response: ChatResponse = serde_json::from_str(&body)?;
 
     let command = chat_response
         .choices
@@ -79,4 +94,14 @@ pub async fn translate(
         .unwrap_or_else(|| "# unable to translate".to_string());
 
     Ok(command)
+}
+
+fn dev_log_enabled() -> bool {
+    match std::env::var("JST_DEV_LOG") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            v == "1" || v == "true" || v == "yes" || v == "on"
+        }
+        Err(_) => false,
+    }
 }
