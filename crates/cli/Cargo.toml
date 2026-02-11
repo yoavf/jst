@@ -16,3 +16,4 @@ reqwest.workspace = true
 crossterm = "0.28"
 dirs = "5"
 clap = { version = "4", features = ["derive"] }
+regex = "1"

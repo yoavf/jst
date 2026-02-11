@@ -8,11 +8,13 @@ use crossterm::{
 use jst_shared::{TranslateRequest, TranslateResponse};
 mod cli_args;
 mod cache;
+mod safety;
 use cache::{
     load_last_command_for_current_shell_session, save_last_command_for_current_shell_session,
     PersistentCache, PromptHistory,
 };
 use cli_args::{parse_cli_mode, CliMode};
+use safety::is_destructive_command;
 use std::fs::OpenOptions;
 use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
@@ -228,7 +230,7 @@ fn translation_prefix() -> &'static str {
     if is_warp_terminal() {
         "-> "
     } else {
-        "⮑ "
+        "⮑  "
     }
 }
 
@@ -367,6 +369,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Show the command that will run (keep translation line style), then execute
         println!("{}{}", translation_prefix(), command);
         std::io::stdout().flush()?;
+
+        if is_destructive_command(&command) {
+            eprint!("\x1b[1;31m⚠ This command may be destructive. Run it? [y/N] \x1b[0m");
+            std::io::stderr().flush()?;
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer)?;
+            let a = answer.trim().to_ascii_lowercase();
+            if a != "y" && a != "yes" {
+                eprintln!("Aborted.");
+                return Ok(());
+            }
+        }
+
         execute_command(&command)?;
     }
 
@@ -619,16 +634,22 @@ fn handle_key_event(event: KeyEvent, state: &mut AppState) -> KeyAction {
             }
         }
         KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => KeyAction::Quit,
-        KeyCode::Enter => match state.mode {
-            InputMode::Natural => {
-                if !state.translation.is_empty() && !state.translation.starts_with("# ") {
-                    KeyAction::Execute(state.translation.clone())
-                } else {
-                    KeyAction::Continue
+        KeyCode::Enter => {
+            if state.is_translating {
+                KeyAction::Continue
+            } else {
+                match state.mode {
+                    InputMode::Natural => {
+                        if !state.translation.is_empty() && !state.translation.starts_with("# ") {
+                            KeyAction::Execute(state.translation.clone())
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
+                    InputMode::Command => KeyAction::Execute(state.input.clone()),
                 }
             }
-            InputMode::Command => KeyAction::Execute(state.input.clone()),
-        },
+        }
         KeyCode::Char('e') if event.modifiers.contains(KeyModifiers::CONTROL) => {
             if !state.translation.is_empty() && !state.translation.starts_with("# ") {
                 state.last_translation = Some(state.translation.clone());
@@ -1115,3 +1136,4 @@ fn default_history_file_for_shell(shell_path: &str) -> Option<PathBuf> {
         None
     }
 }
+
