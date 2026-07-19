@@ -26,7 +26,9 @@ retries, and hosting costs.
 
 Gemini 2.5 Flash Lite is the selected default because it was the fastest model
 with perfect repeated accuracy. Granite 4.1 8B is the strongest cost-optimized
-alternative. Model and provider performance varies over time, so rerun:
+alternative. A post-review run with all response fields required also passed
+8/8 command and 8/8 effect cases at 0.77s average. Model and provider
+performance varies over time, so rerun:
 
 ```sh
 OPENROUTER_API_KEY=... cargo run -p jst-server --example benchmark_models

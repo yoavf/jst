@@ -34,17 +34,12 @@ struct Choice {
 }
 
 pub async fn translate(
+    client: &reqwest::Client,
     api_key: &str,
     model: &str,
     req: &TranslateRequest,
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::new();
-
-    let system_prompt = build_system_prompt(
-        req.context.as_deref(),
-        req.os.as_deref(),
-        req.shell.as_deref(),
-    );
+    let system_prompt = build_system_prompt(req.os.as_deref(), req.shell.as_deref());
 
     let chat_request = ChatRequest {
         model: model.to_string(),
@@ -73,8 +68,7 @@ pub async fn translate(
 
     let response = client
         .post(OPENROUTER_API_URL)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
+        .bearer_auth(api_key)
         .json(&chat_request)
         .send()
         .await?;
@@ -99,9 +93,9 @@ pub async fn translate(
     let content = chat_response
         .choices
         .first()
-        .map(|c| c.message.content.trim().to_string())
+        .map(|choice| choice.message.content.trim())
         .ok_or("OpenRouter returned no choices")?;
-    let content = strip_code_fence(&content);
+    let content = strip_code_fence(content);
 
     Ok(serde_json::from_str(content)?)
 }
@@ -123,5 +117,26 @@ fn dev_log_enabled() -> bool {
             v == "1" || v == "true" || v == "yes" || v == "on"
         }
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_code_fence;
+
+    #[test]
+    fn strips_json_code_fences() {
+        assert_eq!(
+            strip_code_fence("```json\n{\"command\":\"pwd\"}\n```"),
+            r#"{"command":"pwd"}"#
+        );
+    }
+
+    #[test]
+    fn preserves_plain_json() {
+        assert_eq!(
+            strip_code_fence(r#"{"command":"pwd"}"#),
+            r#"{"command":"pwd"}"#
+        );
     }
 }

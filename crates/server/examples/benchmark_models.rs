@@ -209,7 +209,6 @@ async fn request_translation(
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
     let request = TranslateRequest {
         input: input.to_string(),
-        context: None,
         os: Some("macos".to_string()),
         shell: Some("/bin/zsh".to_string()),
     };
@@ -218,7 +217,7 @@ async fn request_translation(
         messages: vec![
             Message {
                 role: "system".to_string(),
-                content: build_system_prompt(None, request.os.as_deref(), request.shell.as_deref()),
+                content: build_system_prompt(request.os.as_deref(), request.shell.as_deref()),
             },
             Message {
                 role: "user".to_string(),

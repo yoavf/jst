@@ -35,6 +35,7 @@ Run the API server locally with an OpenRouter key:
 
 ```sh
 OPENROUTER_API_KEY=... OPENROUTER_MODEL=... cargo run -p jst-server
+JST_API_URL=http://localhost:8080/translate cargo run -p jst-cli -- find large files
 ```
 
 Benchmark the shortlisted OpenRouter models for latency, command quality, and

@@ -32,6 +32,8 @@ jst CLI → JST API proxy → OpenRouter
 The server owns the OpenRouter key and can switch models without shipping a new
 CLI. Candidate models are benchmarked on latency, command generation, and
 effect-classification accuracy with `crates/server/examples/benchmark_models.rs`.
+Anonymous quotas are planned around a random installation token plus a
+privacy-preserving network abuse cap; no account is required.
 
 ## Distribution
 

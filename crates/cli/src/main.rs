@@ -4,8 +4,9 @@ use clap::Parser;
 use jst_shared::{TranslateRequest, TranslateResponse};
 use std::io::{self, Write};
 use std::process::Command;
+use std::time::Duration;
 
-const API_URL: &str = "https://jst-server.fly.dev/translate";
+const DEFAULT_API_URL: &str = "https://jst-server.fly.dev/translate";
 
 #[derive(Parser, Debug)]
 #[command(
@@ -23,7 +24,7 @@ struct Cli {
     prompt: Vec<String>,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
     let input = cli.prompt.join(" ");
@@ -35,11 +36,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     println!("→ {command}");
+    io::stdout().flush()?;
 
     let local_warning = safety::warning_for_command(&command);
     let model_warning = response.model_warning();
     if !cli.yolo && (local_warning.is_some() || model_warning.is_some()) {
-        if let Some(explanation) = response.explanation.as_deref() {
+        if !response.explanation.is_empty() {
+            let explanation = &response.explanation;
             eprintln!("\n{explanation}");
         }
         eprintln!(
@@ -62,16 +65,16 @@ async fn translate(
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
     let request = TranslateRequest {
         input: input.to_string(),
-        context: None,
         os: Some(std::env::consts::OS.to_string()),
         shell: std::env::var("SHELL").ok(),
     };
+    let api_url = std::env::var("JST_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(30))
+        .build()?;
 
-    let response = reqwest::Client::new()
-        .post(API_URL)
-        .json(&request)
-        .send()
-        .await?;
+    let response = client.post(api_url).json(&request).send().await?;
     let status = response.status();
     let body = response.text().await?;
 
@@ -91,6 +94,8 @@ fn clean_command(command: &str) -> String {
     let inner = &trimmed[3..trimmed.len() - 3];
     let inner = inner.strip_prefix("bash\n").unwrap_or(inner);
     let inner = inner.strip_prefix("sh\n").unwrap_or(inner);
+    let inner = inner.strip_prefix("zsh\n").unwrap_or(inner);
+    let inner = inner.strip_prefix("shell\n").unwrap_or(inner);
     inner.trim().to_string()
 }
 
@@ -135,6 +140,7 @@ mod tests {
     #[test]
     fn strips_markdown_fences() {
         assert_eq!(clean_command("```bash\npwd\n```"), "pwd");
+        assert_eq!(clean_command("```zsh\npwd\n```"), "pwd");
     }
 
     #[test]

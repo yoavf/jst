@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 pub struct TranslateRequest {
     pub input: String,
     #[serde(default)]
-    pub context: Option<String>,
-    #[serde(default)]
     pub os: Option<String>,
     #[serde(default)]
     pub shell: Option<String>,
@@ -14,17 +12,14 @@ pub struct TranslateRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranslateResponse {
     pub command: String,
-    #[serde(default)]
     pub effects: CommandEffects,
-    #[serde(default)]
-    pub matches_request: Option<bool>,
-    #[serde(default)]
-    pub explanation: Option<String>,
+    pub matches_request: bool,
+    pub explanation: String,
 }
 
 impl TranslateResponse {
     pub fn model_warning(&self) -> Option<&'static str> {
-        if self.matches_request == Some(false) {
+        if !self.matches_request {
             return Some("The generated command may not match your request.");
         }
 
@@ -53,23 +48,14 @@ impl TranslateResponse {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CommandEffects {
-    #[serde(default)]
     pub reads_data: bool,
-    #[serde(default)]
     pub modifies_data: bool,
-    #[serde(default)]
     pub deletes_data: bool,
-    #[serde(default)]
     pub uses_network: bool,
-    #[serde(default)]
     pub changes_remote_data: bool,
-    #[serde(default)]
     pub changes_processes: bool,
-    #[serde(default)]
     pub installs_software: bool,
-    #[serde(default)]
     pub uses_privilege: bool,
-    #[serde(default)]
     pub executes_remote_code: bool,
 }
 
@@ -86,8 +72,8 @@ mod tests {
         TranslateResponse {
             command: "example".to_string(),
             effects,
-            matches_request: Some(true),
-            explanation: None,
+            matches_request: true,
+            explanation: String::new(),
         }
     }
 
@@ -139,15 +125,16 @@ mod tests {
     #[test]
     fn request_mismatch_requires_confirmation() {
         let mut response = response(CommandEffects::default());
-        response.matches_request = Some(false);
+        response.matches_request = false;
         assert!(response.model_warning().is_some());
     }
 
     #[test]
-    fn older_server_responses_remain_compatible() {
-        let response: TranslateResponse =
-            serde_json::from_str(r#"{"command":"pwd"}"#).expect("valid response");
-        assert_eq!(response.command, "pwd");
-        assert_eq!(response.model_warning(), None);
+    fn incomplete_model_responses_fail_closed() {
+        assert!(serde_json::from_str::<TranslateResponse>(r#"{"command":"pwd"}"#).is_err());
+        assert!(serde_json::from_str::<TranslateResponse>(
+            r#"{"command":"pwd","effects":{},"matches_request":true,"explanation":"Prints the directory."}"#
+        )
+        .is_err());
     }
 }

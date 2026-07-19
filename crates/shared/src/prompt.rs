@@ -1,4 +1,4 @@
-pub fn build_system_prompt(context: Option<&str>, os: Option<&str>, shell: Option<&str>) -> String {
+pub fn build_system_prompt(os: Option<&str>, shell: Option<&str>) -> String {
     let mut prompt = String::from(
         r##"Translate a natural-language request into one executable shell command and describe its concrete effects.
 
@@ -17,8 +17,8 @@ Rules:
 - executes_remote_code means code is downloaded and executed without a separate review step.
 - If translation is impossible, set command to "# unable to translate".
 
-Schema:
-{"command":"string","effects":{"reads_data":bool,"modifies_data":bool,"deletes_data":bool,"uses_network":bool,"changes_remote_data":bool,"changes_processes":bool,"installs_software":bool,"uses_privilege":bool,"executes_remote_code":bool},"matches_request":bool,"explanation":"one short sentence describing what the command does"}"##,
+Required shape:
+{"command":"pwd","effects":{"reads_data":true,"modifies_data":false,"deletes_data":false,"uses_network":false,"changes_remote_data":false,"changes_processes":false,"installs_software":false,"uses_privilege":false,"executes_remote_code":false},"matches_request":true,"explanation":"Prints the current directory."}"##,
     );
 
     if let Some(os) = os {
@@ -29,9 +29,20 @@ Schema:
         prompt.push_str(&format!("\nTarget shell: {}", shell));
     }
 
-    if let Some(ctx) = context {
-        prompt.push_str(&format!("\n\nProject context:\n{}", ctx));
-    }
-
     prompt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_system_prompt;
+
+    #[test]
+    fn includes_target_environment_and_required_effects() {
+        let prompt = build_system_prompt(Some("macos"), Some("/bin/zsh"));
+
+        assert!(prompt.contains("Target OS: macos"));
+        assert!(prompt.contains("Target shell: /bin/zsh"));
+        assert!(prompt.contains("\"deletes_data\":false"));
+        assert!(prompt.contains("\"matches_request\":true"));
+    }
 }
