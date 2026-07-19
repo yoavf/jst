@@ -12,3 +12,4 @@ primary_region = "iad"
 
 [env]
   RUST_LOG = "jst_server=info"
+  OPENROUTER_MODEL = "google/gemini-2.5-flash-lite"

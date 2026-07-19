@@ -11,7 +11,7 @@ use tracing::info;
 
 mod openrouter;
 
-use jst_shared::{ErrorResponse, TranslateRequest, TranslateResponse};
+use jst_shared::{ErrorResponse, TranslateRequest};
 
 struct AppState {
     openrouter_api_key: String,
@@ -30,7 +30,7 @@ async fn main() {
     let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
         .expect("OPENROUTER_API_KEY environment variable must be set");
     let openrouter_model = std::env::var("OPENROUTER_MODEL")
-        .unwrap_or_else(|_| "qwen/qwen2.5-coder-7b-instruct".to_string());
+        .expect("OPENROUTER_MODEL environment variable must be set");
 
     let state = Arc::new(AppState {
         openrouter_api_key,
@@ -64,9 +64,9 @@ async fn translate(
     info!("Translate request: {:?}", req.input);
 
     match openrouter::translate(&state.openrouter_api_key, &state.openrouter_model, &req).await {
-        Ok(command) => {
-            info!("Translated to: {:?}", command);
-            (StatusCode::OK, Json(TranslateResponse { command })).into_response()
+        Ok(response) => {
+            info!("Translated to: {:?}", response.command);
+            (StatusCode::OK, Json(response)).into_response()
         }
         Err(e) => {
             tracing::error!("Translation error: {:?}", e);

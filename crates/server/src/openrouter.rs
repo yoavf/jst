@@ -1,4 +1,4 @@
-use jst_shared::{build_system_prompt, TranslateRequest};
+use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
 
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
@@ -9,6 +9,12 @@ struct ChatRequest {
     messages: Vec<Message>,
     temperature: f32,
     max_tokens: u32,
+    response_format: ResponseFormat,
+}
+
+#[derive(Debug, Serialize)]
+struct ResponseFormat {
+    r#type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,7 +37,7 @@ pub async fn translate(
     api_key: &str,
     model: &str,
     req: &TranslateRequest,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::new();
 
     let system_prompt = build_system_prompt(
@@ -53,7 +59,10 @@ pub async fn translate(
             },
         ],
         temperature: 0.0,
-        max_tokens: 500,
+        max_tokens: 256,
+        response_format: ResponseFormat {
+            r#type: "json_object".to_string(),
+        },
     };
 
     if dev_log_enabled() {
@@ -87,13 +96,24 @@ pub async fn translate(
 
     let chat_response: ChatResponse = serde_json::from_str(&body)?;
 
-    let command = chat_response
+    let content = chat_response
         .choices
         .first()
         .map(|c| c.message.content.trim().to_string())
-        .unwrap_or_else(|| "# unable to translate".to_string());
+        .ok_or("OpenRouter returned no choices")?;
+    let content = strip_code_fence(&content);
 
-    Ok(command)
+    Ok(serde_json::from_str(content)?)
+}
+
+fn strip_code_fence(content: &str) -> &str {
+    let content = content.trim();
+    if !content.starts_with("```") || !content.ends_with("```") {
+        return content;
+    }
+
+    let inner = &content[3..content.len() - 3];
+    inner.strip_prefix("json\n").unwrap_or(inner).trim()
 }
 
 fn dev_log_enabled() -> bool {
