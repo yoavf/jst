@@ -8,7 +8,8 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [env]
   RUST_LOG = "jst_server=info"
+  OPENROUTER_MODEL = "google/gemini-2.5-flash-lite"
