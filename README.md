@@ -6,6 +6,19 @@ Run shell commands from natural-language requests:
 jst find all files bigger than 500 mb in ~/downloads
 ```
 
+## Install
+
+Signed and notarized universal macOS binaries are published with each GitHub
+release. Download the ZIP for the latest release, then install `jst` somewhere
+on your `PATH`, for example:
+
+```sh
+install -m 755 jst-macos-universal/jst ~/.local/bin/jst
+```
+
+The archive includes both Apple Silicon and Intel support. SHA-256 checksums are
+published beside each release artifact.
+
 JST prints the generated command and immediately executes it. Commands that
 match the local destructive-command denylist, or whose model-described effects
 indicate deletion, privilege use, process changes, software installation,
