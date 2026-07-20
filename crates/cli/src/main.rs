@@ -208,12 +208,15 @@ fn clean_command(command: &str) -> String {
 }
 
 fn shell_name() -> Option<String> {
-    std::env::var("SHELL").ok().and_then(|shell| {
-        Path::new(&shell)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_string)
-    })
+    #[cfg(windows)]
+    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+    #[cfg(not(windows))]
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+
+    Path::new(&shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
 }
 
 fn should_confirm(yolo: bool, dry: bool, local_warnings: &[&str], model_warnings: &[&str]) -> bool {
@@ -346,21 +349,21 @@ fn confirm() -> Result<bool, JstError> {
 }
 
 fn execute_command(command: &str) -> Result<(), JstError> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let error = Command::new(shell).arg("-c").arg(command).exec();
         Err(JstError::Other(format!(
             "failed to execute command: {error}"
         )))
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
+        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
         let status = Command::new(shell)
-            .arg("-c")
+            .arg("/C")
             .arg(command)
             .status()
             .map_err(|error| JstError::Other(format!("failed to execute command: {error}")))?;
@@ -370,6 +373,9 @@ fn execute_command(command: &str) -> Result<(), JstError> {
             Err(JstError::Other(format!("command exited with {status}")))
         }
     }
+
+    #[cfg(not(any(unix, windows)))]
+    compile_error!("jst only supports Unix-like systems and Windows");
 }
 
 fn format_error(error: &JstError, color: bool) -> String {
