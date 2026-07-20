@@ -281,6 +281,26 @@ h1 {
   }
 }
 
+.terminal-cursor.is-hidden {
+  opacity: 0;
+  animation: none;
+}
+
+.terminal-spinner {
+  display: none;
+  margin-left: 0.75rem;
+  color: var(--blue);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.translation.is-loading .terminal-spinner {
+  display: inline;
+}
+
+.translation.is-loading .terminal-cursor {
+  display: none;
+}
+
 .hero-actions {
   display: flex;
   align-items: flex-start;
@@ -349,6 +369,12 @@ h1 {
   font-size: 0.8em;
   font-weight: 600;
   text-decoration: none;
+}
+
+.version {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8em;
+  color: rgb(24 23 22 / 35%);
 }
 
 .another-example {
@@ -677,12 +703,6 @@ h3 {
 
 .site-footer p {
   margin: 0;
-}
-
-.site-footer .version {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.8rem;
-  color: rgb(24 23 22 / 40%);
 }
 
 :focus-visible {
