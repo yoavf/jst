@@ -29,6 +29,9 @@ somewhere on your `PATH`. For example, on macOS or Linux:
 install -m 755 jst-*/jst ~/.local/bin/jst
 ```
 
+For WSL, use the Linux archive and install it inside your WSL distribution. Use
+the Windows archive when running `jst` from native Command Prompt or PowerShell.
+
 SHA-256 checksums are published beside every release artifact.
 
 JST prints the generated command and immediately executes it. Commands that
