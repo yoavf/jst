@@ -26,12 +26,13 @@ confirmation layers.
 ## Backend
 
 ```text
-jst CLI → JST API proxy → OpenRouter
+jst CLI → JST API proxy → OpenAI-compatible LLM API
 ```
 
-The server owns the OpenRouter key and can switch models without shipping a new
-CLI. Candidate models are benchmarked on latency, command generation, and
-effect-classification accuracy with `crates/server/examples/benchmark_models.rs`.
+The server owns provider credentials and can switch compatible endpoints or
+models without shipping a new CLI. Candidate models are benchmarked on latency,
+command generation, and effect-classification accuracy with
+`crates/server/examples/benchmark_models.rs`.
 Anonymous quotas are planned around a random installation token plus a
 privacy-preserving network abuse cap; no account is required.
 

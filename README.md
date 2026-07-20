@@ -29,12 +29,13 @@ change models, prompts, and provider settings without requiring users to
 install a new CLI release. The generated command is still checked locally
 before execution.
 
-You do not have to use the hosted proxy. Run the bundled OpenRouter server with
-your own API key:
+You do not have to use the hosted proxy. The bundled server works with any
+OpenAI-compatible chat-completions API. For example, using OpenRouter:
 
 ```sh
-OPENROUTER_API_KEY=... \
-OPENROUTER_MODEL=google/gemini-2.5-flash-lite \
+LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
+LLM_API_KEY=... \
+LLM_MODEL=google/gemini-2.5-flash-lite \
 cargo run --release -p jst-server
 ```
 
@@ -46,9 +47,9 @@ JST_API_URL=http://127.0.0.1:8080/translate jst find large files
 
 The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.
-The bundled server currently uses OpenRouter, but `JST_API_URL` can point to any
-service implementing JST's `/translate` JSON contract, including a custom
-adapter for Ollama or another local model.
+`LLM_API_KEY` is optional for local APIs that do not require authentication.
+Alternatively, `JST_API_URL` can point directly to any service implementing
+JST's `/translate` JSON contract.
 
 ## Development
 

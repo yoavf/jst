@@ -5,7 +5,7 @@
 JST is a Cargo workspace with three crates:
 
 - `jst-cli` — one-shot command translation, safety checks, and execution.
-- `jst-server` — a thin OpenRouter proxy that owns the API key.
+- `jst-server` — a thin proxy for OpenAI-compatible LLM APIs.
 - `jst-shared` — request types, response types, effect policy, and prompting.
 
 ## Request Flow
@@ -13,7 +13,7 @@ JST is a Cargo workspace with three crates:
 ```text
 jst natural language request
   → POST /translate
-  → OpenRouter model
+  → OpenAI-compatible LLM API
   → command + concrete effect description
   → local denylist OR dangerous model effects
   → optional confirmation
@@ -25,11 +25,11 @@ score. The CLI decides whether those effects require confirmation. A model
 response can add a warning but cannot suppress a warning from the local
 denylist.
 
-The server crate is the production proxy: it owns the OpenRouter key, validates
-and bounds requests and responses, limits concurrent provider calls, reuses
-upstream connections, and returns no provider error details to clients. Fly
-keeps one machine warm to avoid cold-start latency and deploys only after CI
-passes.
+The server crate is the production proxy: it owns provider credentials,
+validates and bounds requests and responses, limits concurrent provider calls,
+reuses upstream connections, and returns no provider error details to clients.
+Fly keeps one machine warm to avoid cold-start latency and deploys only after
+CI passes.
 
 ## Anonymous Gating
 
@@ -46,7 +46,7 @@ payment, or platform attestation.
 crates/cli/src/main.rs       argument parsing, API call, confirmation, execution
 crates/cli/src/safety.rs     deterministic destructive-command denylist
 crates/server/src/main.rs    HTTP server and routes
-crates/server/src/openrouter.rs  OpenRouter request and response handling
+crates/server/src/openai_compatible.rs  OpenAI-compatible request handling
 crates/shared/src/types.rs   API contract and model-effect policy
 crates/shared/src/prompt.rs  model instructions and output schema
 ```
@@ -56,7 +56,7 @@ crates/shared/src/prompt.rs  model instructions and output schema
 ```sh
 cargo test --workspace
 cargo build --workspace
-OPENROUTER_API_KEY=... OPENROUTER_MODEL=... cargo run -p jst-server
+LLM_API_URL=... LLM_API_KEY=... LLM_MODEL=... cargo run -p jst-server
 JST_API_URL=http://localhost:8080/translate cargo run -p jst-cli -- pwd
 ```
 

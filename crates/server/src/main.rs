@@ -9,15 +9,16 @@ use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 use tracing::{error, info};
 
-mod openrouter;
+mod openai_compatible;
 
 use jst_shared::{ErrorResponse, TranslateRequest};
 
 #[derive(Clone)]
 struct AppState {
     client: reqwest::Client,
-    openrouter_api_key: String,
-    openrouter_model: String,
+    llm_api_url: String,
+    llm_api_key: String,
+    llm_model: String,
     translation_slots: Arc<Semaphore>,
 }
 
@@ -30,10 +31,14 @@ async fn main() {
         )
         .init();
 
-    let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
-        .expect("OPENROUTER_API_KEY environment variable must be set");
-    let openrouter_model = std::env::var("OPENROUTER_MODEL")
-        .expect("OPENROUTER_MODEL environment variable must be set");
+    let llm_api_url = std::env::var("LLM_API_URL")
+        .unwrap_or_else(|_| "https://openrouter.ai/api/v1/chat/completions".to_string());
+    let llm_api_key = std::env::var("LLM_API_KEY")
+        .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
+        .unwrap_or_default();
+    let llm_model = std::env::var("LLM_MODEL")
+        .or_else(|_| std::env::var("OPENROUTER_MODEL"))
+        .expect("LLM_MODEL environment variable must be set");
     let max_concurrent_translations = std::env::var("MAX_CONCURRENT_TRANSLATIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -44,11 +49,12 @@ async fn main() {
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(30))
         .build()
-        .expect("failed to build OpenRouter client");
+        .expect("failed to build LLM client");
     let state = AppState {
         client,
-        openrouter_api_key,
-        openrouter_model,
+        llm_api_url,
+        llm_api_key,
+        llm_model,
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
     };
 
@@ -99,10 +105,11 @@ async fn translate(
             .into_response();
     };
 
-    match openrouter::translate(
+    match openai_compatible::translate(
         &state.client,
-        &state.openrouter_api_key,
-        &state.openrouter_model,
+        &state.llm_api_url,
+        &state.llm_api_key,
+        &state.llm_model,
         &req,
     )
     .await
