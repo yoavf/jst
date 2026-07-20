@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="JST turns plain-English requests into shell commands, shows you what it made, and runs them."
+    />
+    <meta name="theme-color" content="#f3efe6" />
+    <title>jst — shell commands from plain English</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Gabarito:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@300;400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header wrap">
+      <nav aria-label="Main navigation">
+        <a class="scribble-link" href="https://github.com/yoavf/jst">GitHub</a>
+        <a href="#notes">Notes</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <h1 id="hero-title">
+            <span class="headline-word headline-word--jst">jst</span>
+            <span class="headline-word">do</span>
+            <span class="headline-word">this.<span class="burst" aria-hidden="true"></span></span>
+          </h1>
+          <p><strong>Just type what you want done.</strong> <code class="inline-jst">jst</code> turns it into a shell command and runs it.</p>
+        </div>
+
+        <div
+          class="translation"
+          aria-label="JST turns the request find all files bigger than 500 megabytes in downloads into the shell command find downloads type file size plus 500 megabytes"
+        >
+          <div class="terminal-line terminal-line--request" aria-hidden="true">
+            <span class="terminal-prompt">$</span>
+            <code id="request">jst find all files bigger than 500 mb in ~/downloads</code>
+            <span class="terminal-cursor"></span>
+          </div>
+
+          <div class="terminal-line terminal-line--result is-visible" aria-hidden="true">
+            <span class="terminal-output">→</span>
+            <code id="result">find ~/downloads -type f -size +500M</code>
+          </div>
+
+          <button class="another-example" type="button" aria-label="Show another command example">
+            another one <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+
+        <div class="hero-actions">
+          <div class="install-block">
+            <button class="install-command" type="button" data-copy="brew install yoavf/tap/jst">
+              <span class="install-label" aria-hidden="true">install</span>
+              <span aria-hidden="true">$</span>
+              <code>brew install yoavf/tap/jst</code>
+              <span class="copy-state" aria-live="polite">copy</span>
+            </button>
+            <p>Free for reasonable use<a class="reasonable-use-note" href="#free-use" aria-label="Read the note on reasonable use">*</a> <span aria-hidden="true">·</span> or BYOK <span aria-hidden="true">·</span> open source</p>
+          </div>
+        </div>
+
+        <a class="down-cue" href="#notes" aria-label="Continue to field notes">↓</a>
+      </section>
+
+      <section class="field-guide" id="notes" aria-labelledby="notes-title">
+        <div class="wrap field-grid">
+          <div class="section-intro">
+            <p class="folio">01 / why this exists</p>
+            <h2 id="notes-title">My shell skills<br />got rusty.</h2>
+          </div>
+
+          <div class="motivation">
+            <p class="motivation-lede">With coding agents doing most of the work, I’ve found myself using the shell less. Then, when I do need it, I no longer remember how to do basic things.</p>
+            <div class="motivation-body">
+              <p>Sure, I can ask an LLM how to find a file, then copy its answer into the terminal. But I kept thinking: why not just ask the terminal?</p>
+              <p>So I made <code>jst</code>. Say what you need after the command; it turns that into shell, shows you what it will run, and runs it. It asks before obvious destructive stuff. <code>--yolo</code> is there for more confident days.</p>
+            </div>
+            <p class="motivation-note" aria-hidden="true"><span>$</span> jst find files I changed today</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="quick-start" aria-labelledby="quick-start-title">
+        <div class="wrap quick-start-sheet">
+          <div class="quick-start-heading">
+            <p class="folio">02 / getting started</p>
+            <h2 id="quick-start-title">Off you go.</h2>
+          </div>
+
+          <ol class="quick-start-steps">
+            <li>
+              <span>01</span>
+              <div>
+                <h3>Install it.</h3>
+                <code>brew install yoavf/tap/jst</code>
+                <a href="https://github.com/yoavf/jst/releases/latest">or download the latest release <span aria-hidden="true">→</span></a>
+              </div>
+            </li>
+            <li>
+              <span>02</span>
+              <div>
+                <h3>Put it on your PATH.</h3>
+                <p>Homebrew does this for you. With a downloaded binary, put it somewhere your shell can find it.</p>
+              </div>
+            </li>
+            <li>
+              <span>03</span>
+              <div>
+                <h3>Ask for what you need.</h3>
+                <code>jst find files I changed today</code>
+              </div>
+            </li>
+          </ol>
+
+          <p class="quick-start-safety">JST runs the command, or pauses for approval when something looks destructive. Feeling brave? <code>--yolo</code> it.</p>
+        </div>
+      </section>
+
+      <section class="usage" id="free-use" aria-labelledby="usage-title">
+        <div class="wrap usage-sheet">
+          <div class="usage-heading">
+            <p class="folio">03 / small print, but nice</p>
+            <h2 id="usage-title">Free, within<br />reason.<sup>*</sup></h2>
+          </div>
+
+          <div class="usage-option usage-option--hosted">
+            <p class="option-label">Hosted</p>
+            <h3>Small model,<br />small bill.</h3>
+            <p>JST queries run on a small, fast model, so they’re cheap to run. The budget should be enough for around 200,000 queries each month. A few rate limits prevent abuse—not normal use.</p>
+            <p class="usage-note" aria-hidden="true">please don’t ruin it for everyone <span class="hand-heart">♡</span></p>
+          </div>
+
+          <span class="or-mark" aria-hidden="true">or</span>
+
+          <div class="usage-option usage-option--byok">
+            <p class="option-label">BYOK</p>
+            <h3>Bring your own key.</h3>
+            <p>Run the open-source server with an OpenAI-compatible provider, then point JST at it. Your key, your limits.</p>
+            <code>JST_API_URL=http://localhost:8080/translate</code>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="last-note">
+        <div class="wrap last-note-inner">
+          <p>That’s it, really.</p>
+          <a href="https://github.com/yoavf/jst">Read the source <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer wrap">
+      <p><a href="https://github.com/yoavf">@yoavf</a> did this.</p>
+      <p><a href="https://github.com/yoavf/jst/blob/main/LICENSE">Open source</a>, end to end.</p>
+    </footer>
+  </body>
+</html>
