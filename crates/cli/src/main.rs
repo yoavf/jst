@@ -3,10 +3,12 @@ mod safety;
 use clap::Parser;
 use jst_shared::{TranslateRequest, TranslateResponse};
 use std::io::{self, Write};
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
 const DEFAULT_API_URL: &str = "https://jst-server.fly.dev/translate";
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -34,23 +36,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if command.is_empty() || command.starts_with("# unable to translate") {
         return Err("unable to translate request".into());
     }
+    if contains_unsafe_terminal_character(&command) {
+        return Err("generated command contains unsafe terminal characters".into());
+    }
 
     println!("→ {command}");
     io::stdout().flush()?;
 
-    let local_warning = safety::warning_for_command(&command);
-    let model_warning = response.model_warning();
-    if !cli.yolo && (local_warning.is_some() || model_warning.is_some()) {
+    let local_warnings = safety::warnings_for_command(&command);
+    let model_warnings = response.model_warnings();
+    if should_confirm(cli.yolo, &local_warnings, &model_warnings) {
         if !response.explanation.is_empty() {
-            let explanation = &response.explanation;
+            let explanation = terminal_safe(&response.explanation);
             eprintln!("\n{explanation}");
         }
-        eprintln!(
-            "⚠ {}",
-            local_warning
-                .or(model_warning)
-                .unwrap_or("This command may have side effects.")
-        );
+        for warning in local_warnings.iter().chain(&model_warnings) {
+            eprintln!("⚠ {warning}");
+        }
         if !confirm()? {
             eprintln!("Aborted.");
             return Ok(());
@@ -66,7 +68,7 @@ async fn translate(
     let request = TranslateRequest {
         input: input.to_string(),
         os: Some(std::env::consts::OS.to_string()),
-        shell: std::env::var("SHELL").ok(),
+        shell: shell_name(),
     };
     let api_url = std::env::var("JST_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
     let client = reqwest::Client::builder()
@@ -76,10 +78,10 @@ async fn translate(
 
     let response = client.post(api_url).json(&request).send().await?;
     let status = response.status();
-    let body = response.text().await?;
+    let body = read_limited_body(response, MAX_RESPONSE_BYTES).await?;
 
     if !status.is_success() {
-        return Err(format!("translation service returned {status}: {body}").into());
+        return Err(format!("translation service returned {status}").into());
     }
 
     Ok(serde_json::from_str(&body)?)
@@ -87,16 +89,90 @@ async fn translate(
 
 fn clean_command(command: &str) -> String {
     let trimmed = command.trim();
-    if !trimmed.starts_with("```") || !trimmed.ends_with("```") {
-        return trimmed.to_string();
+    if trimmed == "```" {
+        return String::new();
     }
 
-    let inner = &trimmed[3..trimmed.len() - 3];
-    let inner = inner.strip_prefix("bash\n").unwrap_or(inner);
-    let inner = inner.strip_prefix("sh\n").unwrap_or(inner);
-    let inner = inner.strip_prefix("zsh\n").unwrap_or(inner);
-    let inner = inner.strip_prefix("shell\n").unwrap_or(inner);
+    let Some(inner) = trimmed
+        .strip_prefix("```")
+        .and_then(|inner| inner.strip_suffix("```"))
+    else {
+        return trimmed.to_string();
+    };
+
+    let normalized = inner.replace("\r\n", "\n");
+    let inner = normalized
+        .split_once('\n')
+        .filter(|(language, _)| {
+            matches!(
+                language.trim().to_ascii_lowercase().as_str(),
+                "bash" | "sh" | "shell" | "zsh"
+            )
+        })
+        .map_or(normalized.as_str(), |(_, command)| command);
     inner.trim().to_string()
+}
+
+fn shell_name() -> Option<String> {
+    std::env::var("SHELL").ok().and_then(|shell| {
+        Path::new(&shell)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+    })
+}
+
+fn should_confirm(yolo: bool, local_warnings: &[&str], model_warnings: &[&str]) -> bool {
+    !yolo && (!local_warnings.is_empty() || !model_warnings.is_empty())
+}
+
+fn contains_unsafe_terminal_character(value: &str) -> bool {
+    value.chars().any(is_unsafe_terminal_character)
+}
+
+fn is_unsafe_terminal_character(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{061c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+        )
+}
+
+fn terminal_safe(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if is_unsafe_terminal_character(character) {
+            escaped.extend(character.escape_default());
+        } else {
+            escaped.push(character);
+        }
+    }
+    escaped
+}
+
+async fn read_limited_body(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err("translation response exceeded size limit".into());
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > limit {
+            return Err("translation response exceeded size limit".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8(body)?)
 }
 
 fn confirm() -> io::Result<bool> {
@@ -134,13 +210,17 @@ fn execute_command(command: &str) -> Result<(), Box<dyn std::error::Error + Send
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_command, Cli};
+    use super::{
+        clean_command, contains_unsafe_terminal_character, should_confirm, terminal_safe, Cli,
+    };
     use clap::Parser;
 
     #[test]
     fn strips_markdown_fences() {
         assert_eq!(clean_command("```bash\npwd\n```"), "pwd");
         assert_eq!(clean_command("```zsh\npwd\n```"), "pwd");
+        assert_eq!(clean_command("```Bash\r\npwd\r\n```"), "pwd");
+        assert_eq!(clean_command("```"), "");
     }
 
     #[test]
@@ -181,5 +261,22 @@ mod tests {
     #[test]
     fn rejects_missing_prompt() {
         assert!(Cli::try_parse_from(["jst"]).is_err());
+    }
+
+    #[test]
+    fn confirmation_policy_combines_both_warning_sources() {
+        assert!(!should_confirm(false, &[], &[]));
+        assert!(should_confirm(false, &["local"], &[]));
+        assert!(should_confirm(false, &[], &["model"]));
+        assert!(!should_confirm(true, &["local"], &["model"]));
+    }
+
+    #[test]
+    fn rejects_terminal_spoofing_characters() {
+        assert!(contains_unsafe_terminal_character("echo ok\rmalicious"));
+        assert!(contains_unsafe_terminal_character("echo \u{1b}[2J"));
+        assert!(contains_unsafe_terminal_character("echo \u{202e}txt"));
+        assert!(!contains_unsafe_terminal_character("echo safe"));
+        assert_eq!(terminal_safe("line\nnext\u{1b}"), "line\\nnext\\u{1b}");
     }
 }

@@ -18,31 +18,32 @@ pub struct TranslateResponse {
 }
 
 impl TranslateResponse {
-    pub fn model_warning(&self) -> Option<&'static str> {
-        if !self.matches_request {
-            return Some("The generated command may not match your request.");
-        }
+    pub fn model_warnings(&self) -> Vec<&'static str> {
+        let mut warnings = Vec::new();
 
+        if !self.matches_request {
+            warnings.push("The generated command may not match your request.");
+        }
         if self.effects.deletes_data {
-            return Some("The generated command may delete data.");
+            warnings.push("The generated command may delete data.");
         }
         if self.effects.changes_remote_data {
-            return Some("The generated command may change remote data.");
+            warnings.push("The generated command may change remote data.");
         }
         if self.effects.changes_processes {
-            return Some("The generated command may start, stop, or alter processes.");
+            warnings.push("The generated command may start, stop, or alter processes.");
         }
         if self.effects.installs_software {
-            return Some("The generated command may install or remove software.");
+            warnings.push("The generated command may install or remove software.");
         }
         if self.effects.uses_privilege {
-            return Some("The generated command may use elevated privileges.");
+            warnings.push("The generated command may use elevated privileges.");
         }
         if self.effects.executes_remote_code {
-            return Some("The generated command may execute downloaded code.");
+            warnings.push("The generated command may execute downloaded code.");
         }
 
-        None
+        warnings
     }
 }
 
@@ -85,7 +86,7 @@ mod tests {
             uses_network: true,
             ..CommandEffects::default()
         });
-        assert_eq!(response.model_warning(), None);
+        assert!(response.model_warnings().is_empty());
     }
 
     #[test]
@@ -118,7 +119,7 @@ mod tests {
         ];
 
         for effects in cases {
-            assert!(response(effects).model_warning().is_some());
+            assert!(!response(effects).model_warnings().is_empty());
         }
     }
 
@@ -126,7 +127,20 @@ mod tests {
     fn request_mismatch_requires_confirmation() {
         let mut response = response(CommandEffects::default());
         response.matches_request = false;
-        assert!(response.model_warning().is_some());
+        assert!(!response.model_warnings().is_empty());
+    }
+
+    #[test]
+    fn reports_all_dangerous_effects() {
+        let mut response = response(CommandEffects {
+            deletes_data: true,
+            changes_remote_data: true,
+            uses_privilege: true,
+            ..CommandEffects::default()
+        });
+        response.matches_request = false;
+
+        assert_eq!(response.model_warnings().len(), 4);
     }
 
     #[test]

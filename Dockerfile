@@ -24,4 +24,5 @@ COPY --from=builder /app/target/release/jst-server /app/jst-server
 ENV PORT=8080
 EXPOSE 8080
 
+USER nobody:nogroup
 CMD ["/app/jst-server"]
