@@ -42,6 +42,13 @@ Use `--yolo` to skip all safety confirmations:
 jst --yolo remove all stopped docker containers
 ```
 
+Use `--dry` to require confirmation for every generated command, including
+commands that do not trigger a safety warning:
+
+```sh
+jst --dry show the current directory
+```
+
 ## Server
 
 By default, the CLI sends translation requests to the hosted JST server. The
