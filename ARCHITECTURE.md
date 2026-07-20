@@ -26,8 +26,10 @@ response can add a warning but cannot suppress a warning from the local
 denylist.
 
 The server crate is the production proxy: it owns the OpenRouter key, validates
-and bounds requests, reuses upstream connections, and returns no provider error
-details to clients. Fly keeps one machine warm to avoid cold-start latency.
+and bounds requests and responses, limits concurrent provider calls, reuses
+upstream connections, and returns no provider error details to clients. Fly
+keeps one machine warm to avoid cold-start latency and deploys only after CI
+passes.
 
 ## Anonymous Gating
 

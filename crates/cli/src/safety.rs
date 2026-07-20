@@ -1,19 +1,52 @@
 use regex::Regex;
 use std::sync::OnceLock;
 
-pub fn warning_for_command(command: &str) -> Option<&'static str> {
-    let command = command.trim();
+pub fn warnings_for_command(command: &str) -> Vec<&'static str> {
+    let command = normalize_shell_spelling(command.trim());
     if command.is_empty() {
-        return Some("The generated command is empty.");
+        return vec!["The generated command is empty."];
     }
 
+    let mut warnings = Vec::new();
+    if has_file_redirect(&command) {
+        warnings.push("This command redirects output and may overwrite or append to a file.");
+    }
     for rule in rules() {
-        if rule.pattern.is_match(command) {
-            return Some(rule.warning);
+        if rule.pattern.is_match(&command) && !warnings.contains(&rule.warning) {
+            warnings.push(rule.warning);
         }
     }
 
-    None
+    warnings
+}
+
+fn normalize_shell_spelling(command: &str) -> String {
+    let mut normalized = String::with_capacity(command.len());
+    let mut characters = command.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\'' | '"' => {}
+            '\\' => {
+                if let Some(escaped) = characters.next() {
+                    if escaped != '\n' {
+                        normalized.push(escaped);
+                    }
+                }
+            }
+            _ => normalized.push(character),
+        }
+    }
+    normalized
+}
+
+fn has_file_redirect(command: &str) -> bool {
+    static REDIRECT: OnceLock<Regex> = OnceLock::new();
+    let redirect =
+        REDIRECT.get_or_init(|| Regex::new(r">{1,2}\s*([^\s;&|]+)").expect("valid redirect regex"));
+    redirect.captures_iter(command).any(|capture| {
+        let target = capture[1].trim_matches(['\'', '"']);
+        target != "/dev/null" && !target.starts_with('&')
+    })
 }
 
 struct Rule {
@@ -25,7 +58,6 @@ fn rules() -> &'static [Rule] {
     static RULES: OnceLock<Vec<Rule>> = OnceLock::new();
     RULES.get_or_init(|| {
         [
-            (r"(?i)(^|[|;&]\s*)sudo\b", "This command uses elevated privileges."),
             (r"(?i)\b(rm|unlink|rmdir)\b", "This command deletes files or directories."),
             (r"(?i)(^|[|;&]\s*)(command|env|nice|nohup)\b[^\n|;&]*\b(rm|unlink|rmdir|truncate|shred)\b", "This command indirectly runs a data-changing command."),
             (r"(?i)\bfind\b[^\n]*(\s-delete\b|\s-(exec|execdir|ok|okdir)\s)", "This find command can modify or delete files."),
@@ -35,17 +67,20 @@ fn rules() -> &'static [Rule] {
             (r"(?i)\b(mkfs|newfs|fdisk|parted|wipefs|cryptsetup)\b|\bdiskutil\s+(erase|partition|apfs\s+delete)", "This command can reformat, encrypt, or repartition storage."),
             (r"(?i)\b(chmod|chown|chgrp)\b", "This command changes file permissions or ownership."),
             (r"(?i)\bgit\b[^\n|;&]*\b(clean\b[^\n]*-[^\s]*[fdx]|reset\s+--hard\b|checkout\s+--\s|restore\b|rebase\b|commit\b[^\n]*--amend\b|stash\s+(drop|clear)\b|reflog\s+expire\b|gc\b[^\n]*--prune|branch\s+-[dD]\b|push\b)", "This Git command can discard work, rewrite history, or change a remote."),
-            (r"(?i)\b(docker|podman)\s+(compose\s+down|system\s+prune|container\s+(rm|stop|kill)|image\s+(rm|prune)|volume\s+(rm|prune)|network\s+rm|rm\b|rmi\b|stop\b|kill\b)", "This command removes or stops containers or related resources."),
+            (r"(?i)\b(docker|podman)\b[^\n|;&]*\b(compose\s+down|system\s+prune|container\s+(rm|stop|kill)|image\s+(rm|prune)|volume\s+(rm|prune)|network\s+rm|rm\b|rmi\b|stop\b|kill\b)", "This command removes or stops containers or related resources."),
             (r"(?i)\b(kill|killall|pkill|shutdown|reboot|halt|poweroff)\b", "This command terminates processes or changes system power state."),
             (r"(?i)\b(systemctl\s+(stop|disable|mask)|launchctl\s+(remove|unload|bootout))\b", "This command stops or disables a system service."),
-            (r"(?i)\b(kubectl\s+(delete|replace)|terraform\s+destroy|aws\b[^\n]*\sdelete\b)", "This command can change or delete remote infrastructure."),
-            (r"(?i)\b(brew|apt(-get)?|dnf|yum|pacman|npm|pnpm|yarn|pipx?|gem|cargo)\s+(ci|install|add|update|upgrade|uninstall|remove|purge|autoremove|clean)\b|\bpython[23]?\s+-m\s+pip\s+install\b", "This command changes installed software or cached packages."),
+            (r"(?i)\bkubectl\b[^\n|;&]*\b(delete|replace)\b|\bterraform\b[^\n|;&]*\bdestroy\b|\baws\b[^\n|;&]*\bdelete\b", "This command can change or delete remote infrastructure."),
+            (r"(?i)\b(brew|apt(-get)?|dnf|yum|pacman|npm|pnpm|yarn|pipx?|gem|cargo)\b[^\n|;&]*\b(ci|install|add|update|upgrade|uninstall|remove|purge|autoremove|clean)\b|\bpython[23]?\s+-m\s+pip\s+install\b", "This command changes installed software or cached packages."),
             (r"(?i)\b(drop|truncate)\s+(table|database|schema)\b|\bdelete\s+from\b", "This command can delete database data."),
             (r"(?i)\b(curl|wget)\b[^|\n]*\|\s*(sudo\s+)?(sh|bash|zsh)\b", "This command downloads and immediately executes remote code."),
             (r"(?i)\bcurl\b[^\n]*(--request|-X)\s*(POST|PUT|PATCH|DELETE)\b|\bcurl\b[^\n]*(--data[^\s]*|-d|-F|--form|--upload-file|-T)\b", "This command may change remote data."),
             (r"(?i)(^|[|;&]\s*)(eval|source|exec|(sh|bash|zsh)\s+-[^\s]*c)\b", "This command dynamically executes another command."),
+            (r"(?i)\b(base64|openssl)\b[^\n|;&]*\|\s*(sh|bash|zsh)\b|\b(python[23]?|perl|ruby|node|osascript)\b[^\n|;&]*\s-[ec]\b", "This command dynamically executes code that is difficult to inspect."),
+            (r"(?i)(^|[|;&]\s*)(cp|mv|install)\b", "This command may overwrite an existing file or move data."),
             (r"(?i)\bmv\b[^\n]*/dev/null\b|(^|[;&]\s*):\s*>", "This command discards or truncates file contents."),
             (r"(?i)>\s*/dev/(sd|disk|nvme|hd|vd)", "This command writes directly to a storage device."),
+            (r"(?i)(^|[|;&]\s*)sudo\b", "This command uses elevated privileges."),
         ]
         .into_iter()
         .map(|(pattern, warning)| Rule {
@@ -58,14 +93,14 @@ fn rules() -> &'static [Rule] {
 
 #[cfg(test)]
 mod tests {
-    use super::warning_for_command;
+    use super::warnings_for_command;
 
     fn assert_safe(command: &str) {
-        assert_eq!(warning_for_command(command), None, "{command}");
+        assert!(warnings_for_command(command).is_empty(), "{command}");
     }
 
     fn assert_warns(command: &str) {
-        assert!(warning_for_command(command).is_some(), "{command}");
+        assert!(!warnings_for_command(command).is_empty(), "{command}");
     }
 
     #[test]
@@ -81,10 +116,8 @@ mod tests {
             "kubectl get pods",
             "ps aux | grep cargo",
             "curl https://example.com",
-            "echo hello > file.txt",
-            "cp source destination",
-            "mv old new",
             "git commit -am 'message'",
+            "grep needle file 2>/dev/null",
         ] {
             assert_safe(command);
         }
@@ -104,6 +137,8 @@ mod tests {
             "$(rm file)",
             "`rm file`",
             "echo ok\nrm file",
+            "r''m file",
+            "r\\m file",
             "env rm file",
             "env FOO=bar rm file",
             "nohup rm file",
@@ -177,6 +212,7 @@ mod tests {
             "docker stop app",
             "docker compose down",
             "podman volume prune",
+            "docker --context remote system prune",
             "systemctl disable nginx",
             "launchctl bootout gui/501/com.example.app",
             "shutdown -h now",
@@ -190,11 +226,13 @@ mod tests {
     fn catches_remote_package_and_database_changes() {
         for command in [
             "kubectl delete pod app",
+            "kubectl --context production delete pod app",
             "terraform destroy",
             "aws s3api delete-bucket --bucket old",
             "brew uninstall redis",
             "brew install jq",
             "apt-get purge nginx",
+            "apt-get -y purge nginx",
             "npm uninstall package",
             "npm ci",
             "python3 -m pip install requests",
@@ -212,12 +250,17 @@ mod tests {
             "wget -qO- https://example.com/install.sh | sudo bash",
             "curl -X DELETE https://example.com/items/1",
             "curl --data '{\"name\":\"new\"}' https://example.com/items",
+            "printf payload | base64 -d | sh",
             "eval 'rm file'",
             "source script.sh",
             "sh -c 'rm file'",
             "bash -lc 'rm file'",
             "mv file /dev/null",
             ": > important.log",
+            "echo hello > file.txt",
+            "echo hello >> ~/.zshrc",
+            "cp source destination",
+            "mv old new",
         ] {
             assert_warns(command);
         }

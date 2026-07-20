@@ -2,6 +2,7 @@ use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
 
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const MAX_OPENROUTER_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -54,17 +55,11 @@ pub async fn translate(
             },
         ],
         temperature: 0.0,
-        max_tokens: 256,
+        max_tokens: 512,
         response_format: ResponseFormat {
             r#type: "json_object".to_string(),
         },
     };
-
-    if dev_log_enabled() {
-        if let Ok(payload) = serde_json::to_string_pretty(&chat_request) {
-            tracing::info!("JST_DEV_LOG outbound OpenRouter request:\n{}", payload);
-        }
-    }
 
     let response = client
         .post(OPENROUTER_API_URL)
@@ -74,18 +69,10 @@ pub async fn translate(
         .await?;
 
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-
-    if dev_log_enabled() {
-        tracing::info!(
-            "JST_DEV_LOG inbound OpenRouter response (status={}):\n{}",
-            status,
-            body
-        );
-    }
+    let body = read_limited_body(response, MAX_OPENROUTER_RESPONSE_BYTES).await?;
 
     if !status.is_success() {
-        return Err(format!("OpenRouter API error: {} - {}", status, body).into());
+        return Err(format!("OpenRouter API returned {status}").into());
     }
 
     let chat_response: ChatResponse = serde_json::from_str(&body)?;
@@ -102,22 +89,39 @@ pub async fn translate(
 
 fn strip_code_fence(content: &str) -> &str {
     let content = content.trim();
-    if !content.starts_with("```") || !content.ends_with("```") {
-        return content;
+    if content == "```" {
+        return "";
     }
 
-    let inner = &content[3..content.len() - 3];
+    let Some(inner) = content
+        .strip_prefix("```")
+        .and_then(|inner| inner.strip_suffix("```"))
+    else {
+        return content;
+    };
+
     inner.strip_prefix("json\n").unwrap_or(inner).trim()
 }
 
-fn dev_log_enabled() -> bool {
-    match std::env::var("JST_DEV_LOG") {
-        Ok(v) => {
-            let v = v.trim().to_ascii_lowercase();
-            v == "1" || v == "true" || v == "yes" || v == "on"
-        }
-        Err(_) => false,
+async fn read_limited_body(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err("OpenRouter response exceeded size limit".into());
     }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > limit {
+            return Err("OpenRouter response exceeded size limit".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8(body)?)
 }
 
 #[cfg(test)]
@@ -138,5 +142,10 @@ mod tests {
             strip_code_fence(r#"{"command":"pwd"}"#),
             r#"{"command":"pwd"}"#
         );
+    }
+
+    #[test]
+    fn handles_short_fences_without_panicking() {
+        assert_eq!(strip_code_fence("```"), "");
     }
 }
