@@ -74,7 +74,7 @@ OpenAI-compatible chat-completions API. For example, using OpenRouter:
 ```sh
 LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
 LLM_API_KEY=... \
-LLM_MODEL=google/gemini-2.5-flash-lite \
+LLM_MODEL=ibm-granite/granite-4.1-8b \
 cargo run --release -p jst-server
 ```
 
