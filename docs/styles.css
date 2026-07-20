@@ -679,6 +679,12 @@ h3 {
   margin: 0;
 }
 
+.site-footer .version {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8rem;
+  color: rgb(24 23 22 / 40%);
+}
+
 :focus-visible {
   outline: 3px solid var(--orange);
   outline-offset: 4px;
