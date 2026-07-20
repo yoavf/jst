@@ -75,7 +75,39 @@ async fn main() {
 async fn run() -> Result<(), JstError> {
     let cli = Cli::parse();
     let input = cli.prompt.join(" ");
+    let use_color = should_use_color();
+
+    let spinner = if use_color {
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+        let handle = tokio::spawn(async move {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0;
+            loop {
+                if tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(80)) => false,
+                    _ = &mut stop_rx => true,
+                } {
+                    break;
+                }
+                eprint!("\r{} ", frames[i % frames.len()]);
+                io::stderr().flush().ok();
+                i += 1;
+            }
+        });
+        Some((handle, stop_tx))
+    } else {
+        None
+    };
+
     let response = translate(&input).await?;
+
+    if let Some((handle, stop_tx)) = spinner {
+        let _ = stop_tx.send(());
+        let _ = handle.await;
+        eprint!("\r\x1b[K");
+        io::stderr().flush().ok();
+    }
+
     let command = clean_command(&response.command);
 
     if command.is_empty() || command.starts_with("# unable to translate") {

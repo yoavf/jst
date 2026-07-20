@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "jst-cli"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "clap",
  "getrandom 0.3.4",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "jst-server"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "axum",
  "jst-shared",
@@ -590,7 +590,7 @@ dependencies = [
 
 [[package]]
 name = "jst-shared"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde",
  "serde_json",

@@ -60,7 +60,7 @@ fn rules() -> &'static [Rule] {
         [
             (r"(?i)\b(rm|unlink|rmdir)\b", "This command deletes files or directories."),
             (r"(?i)(^|[|;&]\s*)(command|env|nice|nohup)\b[^\n|;&]*\b(rm|unlink|rmdir|truncate|shred)\b", "This command indirectly runs a data-changing command."),
-            (r"(?i)\bfind\b[^\n]*(\s-delete\b|\s-(exec|execdir|ok|okdir)\s)", "This find command can modify or delete files."),
+            (r"(?i)\bfind\b[^\n]*(\s-delete\b|\s-(exec|execdir|ok|okdir)\s+(\S+/)?(rm|unlink|rmdir|chmod|chown|chgrp|dd|truncate|shred|mkfs|newfs|fdisk|wipefs|cryptsetup|install|cp|mv)\b)", "This find command can modify or delete files."),
             (r"(?i)\bxargs\b[^\n]*(\brm\b|\bunlink\b|\brmdir\b)", "This command can delete files through xargs."),
             (r"(?i)\b(fdupes\b[^\n]*\s-d|rsync\b[^\n]*--delete\b|truncate\b|shred\b|srm\b|wipe\b)", "This command can delete or irreversibly overwrite data."),
             (r"(?i)(^|[|;&]\s*)(sudo(\s+--)?\s+)?([^\s]*/)?dd\s", "This command writes raw data and can overwrite disks."),
@@ -158,10 +158,32 @@ mod tests {
         for command in [
             "find . -delete",
             "find . -exec rm {} \\;",
+            "find . -exec /bin/rm -rf {} +",
             "find . -execdir chmod 777 {} +",
             "find . -ok rm {} \\;",
+            "find . -okdir chown root {} +",
+            "find . -exec truncate -s 0 {} \\;",
+            "find . -exec dd if=/dev/zero of={} \\;",
         ] {
             assert_warns(command);
+        }
+    }
+
+    #[test]
+    fn allows_safe_find_exec() {
+        for command in [
+            "find ~/Downloads -type f -size +500M",
+            "find . -type f | sort | head -n 10",
+            "find ~/downloads -type f -size +30M ! -name \"*.dmg\" -exec du -h {} + | sort -rh | head -n 10",
+            "find . -exec ls -la {} +",
+            "find . -exec stat {} \\;",
+            "find . -exec file {} +",
+            "find . -exec echo {} \\;",
+            "find . -exec printf '%s\\n' {} \\;",
+            "find . -exec grep pattern {} +",
+            "find . -exec wc -l {} +",
+        ] {
+            assert_safe(command);
         }
     }
 
