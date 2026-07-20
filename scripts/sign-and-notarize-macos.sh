@@ -37,13 +37,21 @@ codesign -dv --verbose=4 "$BINARY" 2>&1 | grep -Fq "TeamIdentifier=$SIGNING_TEAM
 
 rm -f "$ARCHIVE" "$CHECKSUM"
 /usr/bin/ditto -c -k --keepParent "$OUTPUT_DIR" "$ARCHIVE"
+
+VERIFY_DIR="$(mktemp -d)"
+trap 'rm -rf -- "$VERIFY_DIR"' EXIT
+/usr/bin/ditto -x -k "$ARCHIVE" "$VERIFY_DIR"
+VERIFIED_BINARY="$VERIFY_DIR/jst-macos-universal/jst"
+codesign --verify --strict --verbose=2 "$VERIFIED_BINARY"
+codesign -dv --verbose=4 "$VERIFIED_BINARY" 2>&1 | grep -Fq "TeamIdentifier=$SIGNING_TEAM_ID"
+"$VERIFIED_BINARY" --version
+
 xcrun notarytool submit "$ARCHIVE" \
     --key "$AC_API_KEY_PATH" \
     --key-id "$AC_API_KEY_ID" \
     --issuer "$AC_API_ISSUER_ID" \
     --wait
 
-spctl --assess --type execute --verbose=4 "$BINARY"
 (cd "$ROOT/dist" && shasum -a 256 "$ARCHIVE_NAME" > "$(basename "$CHECKSUM")")
 
 echo "Done: $ARCHIVE"
