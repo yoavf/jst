@@ -21,5 +21,6 @@ kill_timeout = "30s"
 [env]
   RUST_LOG = "jst_server=info"
   MAX_CONCURRENT_TRANSLATIONS = "32"
+  MONTHLY_REQUEST_LIMIT = "1000"
   LLM_API_URL = "https://openrouter.ai/api/v1/chat/completions"
   LLM_MODEL = "google/gemini-2.5-flash-lite"

@@ -1,3 +1,4 @@
+mod installation;
 mod safety;
 
 use clap::Parser;
@@ -9,6 +10,7 @@ use std::time::Duration;
 
 const DEFAULT_API_URL: &str = "https://jst-server.fly.dev/translate";
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const INSTALLATION_ID_HEADER: &str = "x-jst-installation-id";
 
 #[derive(Parser, Debug)]
 #[command(
@@ -75,8 +77,14 @@ async fn translate(
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(30))
         .build()?;
+    let installation_id = installation::installation_id()?;
 
-    let response = client.post(api_url).json(&request).send().await?;
+    let response = client
+        .post(api_url)
+        .header(INSTALLATION_ID_HEADER, installation_id)
+        .json(&request)
+        .send()
+        .await?;
     let status = response.status();
     let body = read_limited_body(response, MAX_RESPONSE_BYTES).await?;
 

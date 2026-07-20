@@ -27,7 +27,23 @@ By default, the CLI sends translation requests to the hosted JST server. The
 proxy keeps provider credentials out of the distributed binary and lets JST
 change models, prompts, and provider settings without requiring users to
 install a new CLI release. The generated command is still checked locally
-before execution.
+before execution. The complete proxy source lives in
+[`crates/server`](crates/server); JST is open source end to end.
+
+The hosted server currently applies these safeguards:
+
+- 1,000 translations per anonymous installation in a rolling 30-day window.
+- A 32-request concurrency cap, bounded request and response sizes, and provider
+  timeouts.
+- Strict OS and shell metadata validation, with provider errors hidden from
+  clients.
+- `X-RateLimit-Limit` and `X-RateLimit-Remaining` response headers.
+
+The CLI creates a random installation ID in its config directory and sends it
+with translation requests. The server stores only an in-memory hash of that ID;
+older clients fall back to a Fly-provided IP address. This is a best-effort
+spending brake, not identity: deleting the ID bypasses it, and counters reset
+when the server restarts or is redeployed.
 
 You do not have to use the hosted proxy. The bundled server works with any
 OpenAI-compatible chat-completions API. For example, using OpenRouter:
@@ -47,6 +63,8 @@ JST_API_URL=http://127.0.0.1:8080/translate jst find large files
 
 The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.
+`MONTHLY_REQUEST_LIMIT` controls the 30-day quota; set it to `0` to disable
+anonymous usage tracking on your own server.
 `LLM_API_KEY` is optional for local APIs that do not require authentication.
 Alternatively, `JST_API_URL` can point directly to any service implementing
 JST's `/translate` JSON contract.

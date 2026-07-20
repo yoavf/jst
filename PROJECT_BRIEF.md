@@ -33,8 +33,9 @@ The server owns provider credentials and can switch compatible endpoints or
 models without shipping a new CLI. Candidate models are benchmarked on latency,
 command generation, and effect-classification accuracy with
 `crates/server/examples/benchmark_models.rs`.
-Anonymous quotas are planned around a random installation token plus a
-privacy-preserving network abuse cap; no account is required.
+The hosted proxy applies a best-effort 1,000-request rolling 30-day quota using
+a random anonymous installation ID. The counter is instance-local and does not
+provide billing-grade identity or durable enforcement.
 
 ## Distribution
 
