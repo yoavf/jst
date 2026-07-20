@@ -8,6 +8,14 @@ jst find all files bigger than 500 mb in ~/downloads
 
 ## Install
 
+### Homebrew
+
+```sh
+brew install yoavf/tap/jst
+```
+
+### Manual
+
 Signed and notarized universal macOS binaries are published with each GitHub
 release. Download the ZIP for the latest release, then install `jst` somewhere
 on your `PATH`, for example:

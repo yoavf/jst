@@ -43,7 +43,9 @@ xcrun notarytool submit "$ARCHIVE" \
     --issuer "$AC_API_ISSUER_ID" \
     --wait
 
-spctl --assess --type execute --verbose=4 "$BINARY"
+# Note: no spctl check here — `spctl --assess --type execute` rejects standalone
+# CLI binaries ("the code is valid but does not seem to be an app") even when
+# properly signed and notarized. notarytool --wait above is the real gate.
 (cd "$ROOT/dist" && shasum -a 256 "$ARCHIVE_NAME" > "$(basename "$CHECKSUM")")
 
 echo "Done: $ARCHIVE"
