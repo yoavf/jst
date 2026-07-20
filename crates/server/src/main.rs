@@ -11,6 +11,7 @@ use tracing::{error, info};
 
 mod openai_compatible;
 mod rate_limit;
+mod stats;
 
 use jst_shared::{ErrorResponse, TranslateRequest};
 
@@ -30,6 +31,7 @@ struct AppState {
     minute_limiter: Option<Arc<rate_limit::RateLimiter>>,
     daily_ip_limiter: Option<Arc<rate_limit::RateLimiter>>,
     global_daily_limiter: Option<Arc<rate_limit::RateLimiter>>,
+    stats: Option<Arc<stats::StatsCollector>>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -94,6 +96,10 @@ async fn main() {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("failed to build LLM client");
+    let stats = stats::StatsCollector::from_env(&client);
+    if let Some(collector) = stats.clone() {
+        tokio::spawn(collector.flush_loop());
+    }
     let state = AppState {
         client,
         llm_api_url,
@@ -128,12 +134,14 @@ async fn main() {
                 DAY,
             ))
         }),
+        stats: stats.clone(),
     };
 
     let app = Router::new()
         .route("/", get(health))
         .route("/health", get(health))
         .route("/translate", post(translate))
+        .route("/stats", get(usage_stats))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(state);
 
@@ -147,10 +155,44 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+
+    if let Some(stats) = &stats {
+        stats.flush().await;
+    }
 }
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn usage_stats(State(state): State<AppState>) -> Response {
+    let Some(stats) = &state.stats else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "usage stats are not enabled".to_string(),
+            }),
+        )
+            .into_response();
+    };
+
+    let mut response = match stats.snapshot().await {
+        Ok(snapshot) => (StatusCode::OK, Json(snapshot)).into_response(),
+        Err(error) => {
+            error!("Stats error: {error}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "usage stats are temporarily unavailable".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    };
+    response
+        .headers_mut()
+        .insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    response
 }
 
 async fn translate(
@@ -251,7 +293,12 @@ async fn translate(
     )
     .await
     {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(response) => {
+            if let Some(stats) = &state.stats {
+                stats.record(&response.command);
+            }
+            (StatusCode::OK, Json(response)).into_response()
+        }
         Err(error) => {
             error!("Translation error: {error}");
             (

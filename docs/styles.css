@@ -684,6 +684,168 @@ h3 {
   outline-offset: 4px;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.stats {
+  padding-bottom: clamp(7rem, 12vw, 12rem);
+}
+
+.stats-sheet {
+  display: grid;
+  border-block: 1px solid rgb(24 23 22 / 22%);
+  padding-block: clamp(5rem, 8vw, 8rem);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(2rem, 4vw, 4rem);
+}
+
+.stats-heading {
+  grid-column: 1 / -1;
+}
+
+.stats-heading h2 {
+  font-size: clamp(3.8rem, 6vw, 6.3rem);
+}
+
+.stats-total,
+.stats-commands {
+  padding-top: 1.25rem;
+}
+
+.stats-subhead {
+  margin-bottom: 1.5rem;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+
+.stats-number {
+  margin: 0;
+  color: var(--blue);
+  font-family: "Kalam", cursive;
+  font-size: clamp(4.5rem, 11vw, 10rem);
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 1px 1px 0 rgb(12 46 131 / 16%);
+  transform: rotate(-1.2deg);
+  width: fit-content;
+}
+
+.stats-caption {
+  margin: 0.6rem 0 0 0.4rem;
+  color: var(--ink);
+  font-size: clamp(1.2rem, 2vw, 1.6rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.stats-note {
+  margin: 2.2rem 0 0 0.4rem;
+  color: var(--blue);
+  font-family: "Kalam", cursive;
+  font-size: 1.05rem;
+  transform: rotate(-1deg);
+}
+
+.stats-trend {
+  grid-column: 1 / -1;
+  margin-top: clamp(1rem, 3vw, 3rem);
+}
+
+.day-bars {
+  display: flex;
+  height: clamp(3rem, 7vw, 5rem);
+  align-items: flex-end;
+  gap: 3px;
+  border-bottom: 2px dashed rgb(24 23 22 / 25%);
+}
+
+.day-bar {
+  min-height: 2px;
+  height: var(--value, 0%);
+  flex: 1 1 0;
+  border-radius: 2px 2px 0 0;
+  background: var(--blue);
+  box-shadow: 1px 1px 0 rgb(12 46 131 / 22%);
+}
+
+.day-bar--today {
+  background: var(--orange);
+  box-shadow: 1px 1px 0 rgb(235 77 32 / 25%);
+}
+
+.day-bars-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  color: var(--blue);
+  font-family: "Kalam", cursive;
+  font-size: 0.95rem;
+}
+
+.command-bars {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: 1.15rem;
+}
+
+.command-bar {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 9rem) 1fr minmax(3.5rem, auto);
+  align-items: center;
+  gap: clamp(0.8rem, 2vw, 1.6rem);
+}
+
+.command-bar-label {
+  overflow: hidden;
+  color: var(--blue-dark);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: clamp(0.85rem, 1.4vw, 1rem);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-bar-track {
+  height: 1.05rem;
+  border-bottom: 2px dashed rgb(24 23 22 / 25%);
+}
+
+.command-bar-fill {
+  display: block;
+  width: var(--value, 0%);
+  height: 100%;
+  border-radius: 2px 5px 3px 2px;
+  background: var(--blue);
+  box-shadow: 1px 1px 0 rgb(12 46 131 / 22%);
+  transform: rotate(-0.3deg);
+}
+
+.command-bar-fill--top {
+  background: var(--orange);
+  box-shadow: 1px 1px 0 rgb(235 77 32 / 25%);
+}
+
+.command-bar-count {
+  color: var(--ink);
+  font-family: "Kalam", cursive;
+  font-size: clamp(0.95rem, 1.5vw, 1.15rem);
+  text-align: right;
+}
+
 @media (max-width: 980px) {
   :root {
     --wrap: min(100% - 3rem, 86rem);
@@ -715,6 +877,14 @@ h3 {
 
   .usage-sheet {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .stats-sheet {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-trend {
+    margin-top: 0;
   }
 
   .usage-heading {

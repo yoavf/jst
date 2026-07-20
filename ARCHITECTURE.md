@@ -46,6 +46,20 @@ Durable enforcement would require a shared TTL store; strict per-person
 enforcement requires identity, payment, or platform attestation. The IP limiter
 depends on a trusted reverse proxy overwriting `Fly-Client-IP`.
 
+## Anonymous Usage Stats
+
+The server keeps aggregate counters — total translations, a histogram of base
+command names (`find`, `git`, …), and per-day totals for a 30-day trend — and
+never stores request input, full commands, arguments, or installation
+identifiers. Each machine buffers counts in memory and flushes them about once
+a minute (and once on shutdown) to a shared serverless Redis over its REST
+API, so any number of machines and regions contribute to the same totals
+without database replication. Day keys expire after 40 days. `GET /stats`
+returns the cached snapshot (60-second cache, CORS-enabled) powering the stats
+section on the public website. Stats are disabled unless
+`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, and count
+successful translations only.
+
 ## Workspace
 
 ```text
@@ -55,6 +69,7 @@ crates/cli/src/safety.rs     deterministic destructive-command denylist
 crates/server/src/main.rs    HTTP server and routes
 crates/server/src/openai_compatible.rs  OpenAI-compatible request handling
 crates/server/src/rate_limit.rs  bounded rolling-window usage limits
+crates/server/src/stats.rs     buffered anonymous usage counters and /stats
 crates/shared/src/types.rs   API contract and model-effect policy
 crates/shared/src/prompt.rs  model instructions and output schema
 ```
