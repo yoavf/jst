@@ -21,26 +21,65 @@ Use `--yolo` to skip all safety confirmations:
 jst --yolo remove all stopped docker containers
 ```
 
+## Server
+
+By default, the CLI sends translation requests to the hosted JST server. The
+proxy keeps provider credentials out of the distributed binary and lets JST
+change models, prompts, and provider settings without requiring users to
+install a new CLI release. The generated command is still checked locally
+before execution. The complete proxy source lives in
+[`crates/server`](crates/server); JST is open source end to end.
+
+The hosted server currently applies these safeguards:
+
+- 1,000 translations per anonymous installation in a rolling 30-day window.
+- 20 translations per minute per client IP at the Fly proxy.
+- A 32-request concurrency cap, bounded request and response sizes, and provider
+  timeouts.
+- Strict OS and shell metadata validation, with provider errors hidden from
+  clients.
+- Monthly and per-minute rate-limit response headers.
+
+The CLI creates a random installation ID in its config directory and sends it
+with translation requests. The server stores only an in-memory hash of that ID;
+older clients fall back to a Fly-provided IP address. This is a best-effort
+spending brake, not identity: deleting the ID bypasses it, and counters reset
+when the server restarts or is redeployed.
+
+You do not have to use the hosted proxy. The bundled server works with any
+OpenAI-compatible chat-completions API. For example, using OpenRouter:
+
+```sh
+LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
+LLM_API_KEY=... \
+LLM_MODEL=google/gemini-2.5-flash-lite \
+cargo run --release -p jst-server
+```
+
+Then point the CLI at it:
+
+```sh
+JST_API_URL=http://127.0.0.1:8080/translate jst find large files
+```
+
+The server listens on `PORT` (default `8080`).
+`MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.
+`MONTHLY_REQUEST_LIMIT` controls the 30-day quota; set it to `0` to disable
+anonymous usage tracking on your own server.
+`REQUESTS_PER_MINUTE` controls the short-term client-IP limit and also accepts
+`0` to disable it. The bundled implementation trusts Fly's `Fly-Client-IP`
+header; self-hosters should only enable this behind a proxy that overwrites that
+header rather than accepting it from clients.
+`LLM_API_KEY` is optional for local APIs that do not require authentication.
+Alternatively, `JST_API_URL` can point directly to any service implementing
+JST's `/translate` JSON contract.
+
 ## Development
 
-GitHub Actions runs formatting and workspace tests on every pull request and
-push to `main`.
+GitHub Actions runs formatting, build, tests, and Clippy on every pull request
+and push to `main`.
 
 ```sh
 cargo test --workspace
 cargo build --workspace
-```
-
-Run the API server locally with an OpenRouter key:
-
-```sh
-OPENROUTER_API_KEY=... OPENROUTER_MODEL=... cargo run -p jst-server
-JST_API_URL=http://localhost:8080/translate cargo run -p jst-cli -- find large files
-```
-
-Benchmark the shortlisted OpenRouter models for latency, command quality, and
-effect classification:
-
-```sh
-OPENROUTER_API_KEY=... cargo run -p jst-server --example benchmark_models
 ```

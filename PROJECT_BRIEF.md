@@ -26,14 +26,17 @@ confirmation layers.
 ## Backend
 
 ```text
-jst CLI → JST API proxy → OpenRouter
+jst CLI → JST API proxy → OpenAI-compatible LLM API
 ```
 
-The server owns the OpenRouter key and can switch models without shipping a new
-CLI. Candidate models are benchmarked on latency, command generation, and
-effect-classification accuracy with `crates/server/examples/benchmark_models.rs`.
-Anonymous quotas are planned around a random installation token plus a
-privacy-preserving network abuse cap; no account is required.
+The server owns provider credentials and can switch compatible endpoints or
+models without shipping a new CLI. Candidate models are benchmarked on latency,
+command generation, and effect-classification accuracy with
+`crates/server/examples/benchmark_models.rs`.
+The hosted proxy applies a best-effort 1,000-request rolling 30-day quota using
+a random anonymous installation ID, plus a 20-request-per-minute limit using
+Fly's client IP. The counters are instance-local and do not provide
+billing-grade identity or durable enforcement.
 
 ## Distribution
 

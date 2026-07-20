@@ -14,3 +14,4 @@ tokio.workspace = true
 reqwest.workspace = true
 clap = { version = "4", features = ["derive"] }
 regex = "1"
+getrandom = "0.3"

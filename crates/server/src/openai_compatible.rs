@@ -1,8 +1,7 @@
 use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
 
-const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-const MAX_OPENROUTER_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_LLM_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -36,6 +35,7 @@ struct Choice {
 
 pub async fn translate(
     client: &reqwest::Client,
+    api_url: &str,
     api_key: &str,
     model: &str,
     req: &TranslateRequest,
@@ -61,18 +61,19 @@ pub async fn translate(
         },
     };
 
-    let response = client
-        .post(OPENROUTER_API_URL)
-        .bearer_auth(api_key)
-        .json(&chat_request)
-        .send()
-        .await?;
+    let request = client.post(api_url).json(&chat_request);
+    let request = if api_key.is_empty() {
+        request
+    } else {
+        request.bearer_auth(api_key)
+    };
+    let response = request.send().await?;
 
     let status = response.status();
-    let body = read_limited_body(response, MAX_OPENROUTER_RESPONSE_BYTES).await?;
+    let body = read_limited_body(response, MAX_LLM_RESPONSE_BYTES).await?;
 
     if !status.is_success() {
-        return Err(format!("OpenRouter API returned {status}").into());
+        return Err(format!("LLM API returned {status}").into());
     }
 
     let chat_response: ChatResponse = serde_json::from_str(&body)?;
@@ -81,7 +82,7 @@ pub async fn translate(
         .choices
         .first()
         .map(|choice| choice.message.content.trim())
-        .ok_or("OpenRouter returned no choices")?;
+        .ok_or("LLM API returned no choices")?;
     let content = strip_code_fence(content);
 
     Ok(serde_json::from_str(content)?)
@@ -111,13 +112,13 @@ async fn read_limited_body(
         .content_length()
         .is_some_and(|length| length > limit as u64)
     {
-        return Err("OpenRouter response exceeded size limit".into());
+        return Err("LLM response exceeded size limit".into());
     }
 
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         if body.len() + chunk.len() > limit {
-            return Err("OpenRouter response exceeded size limit".into());
+            return Err("LLM response exceeded size limit".into());
         }
         body.extend_from_slice(&chunk);
     }
