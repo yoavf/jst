@@ -34,11 +34,12 @@ The hosted server currently applies these safeguards:
 
 - 1,000 translations per anonymous installation in a rolling 30-day window.
 - 20 translations per minute per client IP at the Fly proxy.
-- A 32-request concurrency cap, bounded request and response sizes, and provider
-  timeouts.
+- 100 translations per client IP and 5,000 globally per rolling 24-hour window.
+- A 32-request concurrency cap, 512-byte prompts, 2 KiB request bodies,
+  256-token model outputs, and provider timeouts.
 - Strict OS and shell metadata validation, with provider errors hidden from
   clients.
-- Monthly and per-minute rate-limit response headers.
+- Rate-limit response headers for each active quota.
 
 The CLI creates a random installation ID in its config directory and sends it
 with translation requests. The server stores only an in-memory hash of that ID;
@@ -66,10 +67,11 @@ The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.
 `MONTHLY_REQUEST_LIMIT` controls the 30-day quota; set it to `0` to disable
 anonymous usage tracking on your own server.
-`REQUESTS_PER_MINUTE` controls the short-term client-IP limit and also accepts
-`0` to disable it. The bundled implementation trusts Fly's `Fly-Client-IP`
-header; self-hosters should only enable this behind a proxy that overwrites that
-header rather than accepting it from clients.
+`REQUESTS_PER_MINUTE`, `DAILY_REQUESTS_PER_IP`, and
+`GLOBAL_DAILY_REQUEST_LIMIT` control the short-term, daily client-IP, and global
+daily limits. Each accepts `0` to disable it. The bundled implementation trusts
+Fly's `Fly-Client-IP` header; self-hosters should only enable IP limits behind a
+proxy that overwrites that header rather than accepting it from clients.
 `LLM_API_KEY` is optional for local APIs that do not require authentication.
 Alternatively, `JST_API_URL` can point directly to any service implementing
 JST's `/translate` JSON contract.

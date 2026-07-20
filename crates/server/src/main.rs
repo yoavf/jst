@@ -14,6 +14,11 @@ mod rate_limit;
 
 use jst_shared::{ErrorResponse, TranslateRequest};
 
+const MAX_REQUEST_BODY_BYTES: usize = 2 * 1024;
+const MAX_INPUT_BYTES: usize = 512;
+const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+const MONTH: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
 #[derive(Clone)]
 struct AppState {
     client: reqwest::Client,
@@ -23,6 +28,21 @@ struct AppState {
     translation_slots: Arc<Semaphore>,
     usage_limiter: Option<Arc<rate_limit::RateLimiter>>,
     minute_limiter: Option<Arc<rate_limit::RateLimiter>>,
+    daily_ip_limiter: Option<Arc<rate_limit::RateLimiter>>,
+    global_daily_limiter: Option<Arc<rate_limit::RateLimiter>>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct UsageHeaders {
+    monthly: Option<(u32, u32)>,
+    minute: Option<(u32, u32)>,
+    daily_ip: Option<(u32, u32)>,
+    global_daily: Option<(u32, u32)>,
+}
+
+enum LimitFailure {
+    Exhausted(u32),
+    Capacity,
 }
 
 #[tokio::main]
@@ -55,6 +75,14 @@ async fn main() {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(20);
+    let daily_requests_per_ip = std::env::var("DAILY_REQUESTS_PER_IP")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(100);
+    let global_daily_request_limit = std::env::var("GLOBAL_DAILY_REQUEST_LIMIT")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(5_000);
     let max_tracked_installations = std::env::var("MAX_TRACKED_INSTALLATIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -76,7 +104,7 @@ async fn main() {
             Arc::new(rate_limit::RateLimiter::new(
                 monthly_request_limit,
                 max_tracked_installations,
-                Duration::from_secs(30 * 24 * 60 * 60),
+                MONTH,
             ))
         }),
         minute_limiter: (requests_per_minute > 0).then(|| {
@@ -86,13 +114,27 @@ async fn main() {
                 Duration::from_secs(60),
             ))
         }),
+        daily_ip_limiter: (daily_requests_per_ip > 0).then(|| {
+            Arc::new(rate_limit::RateLimiter::new(
+                daily_requests_per_ip,
+                max_tracked_installations,
+                DAY,
+            ))
+        }),
+        global_daily_limiter: (global_daily_request_limit > 0).then(|| {
+            Arc::new(rate_limit::RateLimiter::new(
+                global_daily_request_limit,
+                1,
+                DAY,
+            ))
+        }),
     };
 
     let app = Router::new()
         .route("/", get(health))
         .route("/health", get(health))
         .route("/translate", post(translate))
-        .layer(DefaultBodyLimit::max(16 * 1024))
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
@@ -126,108 +168,78 @@ async fn translate(
             .into_response();
     }
 
-    let minute_usage = if let Some(limiter) = &state.minute_limiter {
-        let fingerprint = match request_address_fingerprint(&headers)
-            .and_then(|value| value.map_or_else(|| request_fingerprint(&headers), Ok))
-        {
-            Ok(fingerprint) => fingerprint,
-            Err(message) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: message.to_string(),
-                    }),
-                )
-                    .into_response();
-            }
+    let client_limits_enabled = state.minute_limiter.is_some()
+        || state.daily_ip_limiter.is_some()
+        || state.usage_limiter.is_some();
+    let ip_limits_enabled = state.minute_limiter.is_some() || state.daily_ip_limiter.is_some();
+    let (installation_fingerprint, address_fingerprint) =
+        match request_limit_fingerprints(&headers, client_limits_enabled, ip_limits_enabled) {
+            Ok(fingerprints) => fingerprints,
+            Err(message) => return bad_request(message),
         };
+    let client_fingerprint = address_fingerprint
+        .as_deref()
+        .or(installation_fingerprint.as_deref())
+        .unwrap_or("");
+    let mut usage = UsageHeaders::default();
 
-        match limiter.check(&fingerprint) {
-            rate_limit::Decision::Allowed { limit, remaining } => Some((limit, remaining)),
-            rate_limit::Decision::Exhausted { limit } => {
-                let mut response = with_usage_headers(
-                    (
-                        StatusCode::TOO_MANY_REQUESTS,
-                        Json(ErrorResponse {
-                            error: "per-minute translation limit reached; try again shortly"
-                                .to_string(),
-                        }),
-                    )
-                        .into_response(),
-                    None,
-                    Some((limit, 0)),
-                );
-                response
-                    .headers_mut()
-                    .insert("retry-after", HeaderValue::from_static("60"));
-                return response;
-            }
-            rate_limit::Decision::Capacity => {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(ErrorResponse {
-                        error: "translation service is busy; try again shortly".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
+    match check_limit(&state.minute_limiter, client_fingerprint) {
+        Ok(value) => usage.minute = value,
+        Err(LimitFailure::Exhausted(limit)) => {
+            usage.minute = Some((limit, 0));
+            return limit_response(
+                "per-minute translation limit reached; try again shortly",
+                Some("60"),
+                usage,
+            );
         }
-    } else {
-        None
-    };
+        Err(LimitFailure::Capacity) => return busy_response(),
+    }
+
+    match check_limit(&state.daily_ip_limiter, client_fingerprint) {
+        Ok(value) => usage.daily_ip = value,
+        Err(LimitFailure::Exhausted(limit)) => {
+            usage.daily_ip = Some((limit, 0));
+            return limit_response(
+                "daily client translation limit reached; try again later",
+                None,
+                usage,
+            );
+        }
+        Err(LimitFailure::Capacity) => return busy_response(),
+    }
+
+    match check_limit(
+        &state.usage_limiter,
+        installation_fingerprint.as_deref().unwrap_or(""),
+    ) {
+        Ok(value) => usage.monthly = value,
+        Err(LimitFailure::Exhausted(limit)) => {
+            usage.monthly = Some((limit, 0));
+            return limit_response(
+                "monthly translation limit reached; use your own JST server",
+                None,
+                usage,
+            );
+        }
+        Err(LimitFailure::Capacity) => return busy_response(),
+    }
+
+    match check_limit(&state.global_daily_limiter, "global") {
+        Ok(value) => usage.global_daily = value,
+        Err(LimitFailure::Exhausted(limit)) => {
+            usage.global_daily = Some((limit, 0));
+            return limit_response(
+                "hosted daily translation capacity reached; use your own JST server",
+                None,
+                usage,
+            );
+        }
+        Err(LimitFailure::Capacity) => return busy_response(),
+    }
 
     let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(ErrorResponse {
-                error: "translation service is busy; try again shortly".to_string(),
-            }),
-        )
-            .into_response();
-    };
-
-    let usage = if let Some(limiter) = &state.usage_limiter {
-        let fingerprint = match request_fingerprint(&headers) {
-            Ok(fingerprint) => fingerprint,
-            Err(message) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: message.to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        };
-
-        match limiter.check(&fingerprint) {
-            rate_limit::Decision::Allowed { limit, remaining } => Some((limit, remaining)),
-            rate_limit::Decision::Exhausted { limit } => {
-                return with_usage_headers(
-                    (
-                        StatusCode::TOO_MANY_REQUESTS,
-                        Json(ErrorResponse {
-                            error: "monthly translation limit reached; use your own JST server"
-                                .to_string(),
-                        }),
-                    )
-                        .into_response(),
-                    Some((limit, 0)),
-                    minute_usage,
-                );
-            }
-            rate_limit::Decision::Capacity => {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(ErrorResponse {
-                        error: "translation service is busy; try again shortly".to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        None
+        return with_usage_headers(busy_response(), usage);
     };
 
     let response = match openai_compatible::translate(
@@ -251,7 +263,62 @@ async fn translate(
                 .into_response()
         }
     };
-    with_usage_headers(response, usage, minute_usage)
+    with_usage_headers(response, usage)
+}
+
+fn check_limit(
+    limiter: &Option<Arc<rate_limit::RateLimiter>>,
+    fingerprint: &str,
+) -> Result<Option<(u32, u32)>, LimitFailure> {
+    let Some(limiter) = limiter else {
+        return Ok(None);
+    };
+
+    match limiter.check(fingerprint) {
+        rate_limit::Decision::Allowed { limit, remaining } => Ok(Some((limit, remaining))),
+        rate_limit::Decision::Exhausted { limit } => Err(LimitFailure::Exhausted(limit)),
+        rate_limit::Decision::Capacity => Err(LimitFailure::Capacity),
+    }
+}
+
+fn bad_request(message: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn busy_response() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(ErrorResponse {
+            error: "translation service is busy; try again shortly".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn limit_response(message: &str, retry_after: Option<&str>, usage: UsageHeaders) -> Response {
+    let mut response = with_usage_headers(
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResponse {
+                error: message.to_string(),
+            }),
+        )
+            .into_response(),
+        usage,
+    );
+    if let Some(retry_after) = retry_after {
+        response.headers_mut().insert(
+            "retry-after",
+            HeaderValue::from_str(retry_after).expect("valid retry-after header"),
+        );
+    }
+    response
 }
 
 fn request_address_fingerprint(headers: &HeaderMap) -> Result<Option<String>, &'static str> {
@@ -263,6 +330,21 @@ fn request_address_fingerprint(headers: &HeaderMap) -> Result<Option<String>, &'
         .parse::<IpAddr>()
         .map_err(|_| "invalid client address")?;
     Ok(Some(format!("address:{address}")))
+}
+
+fn request_limit_fingerprints(
+    headers: &HeaderMap,
+    client_limits_enabled: bool,
+    ip_limits_enabled: bool,
+) -> Result<(Option<String>, Option<String>), &'static str> {
+    let installation = client_limits_enabled
+        .then(|| request_fingerprint(headers))
+        .transpose()?;
+    let address = ip_limits_enabled
+        .then(|| request_address_fingerprint(headers))
+        .transpose()?
+        .flatten();
+    Ok((installation, address))
 }
 
 fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
@@ -292,37 +374,56 @@ fn is_installation_id(value: &str) -> bool {
         })
 }
 
-fn with_usage_headers(
-    mut response: Response,
-    monthly_usage: Option<(u32, u32)>,
-    minute_usage: Option<(u32, u32)>,
-) -> Response {
-    if let Some((limit, remaining)) = monthly_usage {
-        response.headers_mut().insert(
-            "x-ratelimit-limit",
-            HeaderValue::from_str(&limit.to_string()).expect("valid rate limit header"),
-        );
-        response.headers_mut().insert(
-            "x-ratelimit-remaining",
-            HeaderValue::from_str(&remaining.to_string()).expect("valid rate limit header"),
-        );
-    }
-    if let Some((limit, remaining)) = minute_usage {
-        response.headers_mut().insert(
-            "x-ratelimit-minute-limit",
-            HeaderValue::from_str(&limit.to_string()).expect("valid rate limit header"),
-        );
-        response.headers_mut().insert(
-            "x-ratelimit-minute-remaining",
-            HeaderValue::from_str(&remaining.to_string()).expect("valid rate limit header"),
-        );
-    }
+fn with_usage_headers(mut response: Response, usage: UsageHeaders) -> Response {
+    insert_usage_headers(
+        response.headers_mut(),
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        usage.monthly,
+    );
+    insert_usage_headers(
+        response.headers_mut(),
+        "x-ratelimit-minute-limit",
+        "x-ratelimit-minute-remaining",
+        usage.minute,
+    );
+    insert_usage_headers(
+        response.headers_mut(),
+        "x-ratelimit-daily-ip-limit",
+        "x-ratelimit-daily-ip-remaining",
+        usage.daily_ip,
+    );
+    insert_usage_headers(
+        response.headers_mut(),
+        "x-ratelimit-global-daily-limit",
+        "x-ratelimit-global-daily-remaining",
+        usage.global_daily,
+    );
     response
 }
 
+fn insert_usage_headers(
+    headers: &mut HeaderMap,
+    limit_name: &'static str,
+    remaining_name: &'static str,
+    usage: Option<(u32, u32)>,
+) {
+    let Some((limit, remaining)) = usage else {
+        return;
+    };
+    headers.insert(
+        limit_name,
+        HeaderValue::from_str(&limit.to_string()).expect("valid rate limit header"),
+    );
+    headers.insert(
+        remaining_name,
+        HeaderValue::from_str(&remaining.to_string()).expect("valid rate limit header"),
+    );
+}
+
 fn validate_request(request: &TranslateRequest) -> Result<(), &'static str> {
-    if request.input.trim().is_empty() || request.input.len() > 2_000 {
-        return Err("request must contain 1–2000 bytes of input");
+    if request.input.trim().is_empty() || request.input.len() > MAX_INPUT_BYTES {
+        return Err("request must contain 1–512 bytes of input");
     }
     if request.os.as_ref().is_some_and(|os| {
         !matches!(
@@ -371,8 +472,14 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{request_fingerprint, validate_request};
-    use axum::http::{HeaderMap, HeaderValue};
+    use super::{
+        request_fingerprint, request_limit_fingerprints, validate_request, with_usage_headers,
+        UsageHeaders,
+    };
+    use axum::{
+        http::{HeaderMap, HeaderValue, StatusCode},
+        response::IntoResponse,
+    };
     use jst_shared::TranslateRequest;
 
     fn request(input: &str) -> TranslateRequest {
@@ -391,7 +498,8 @@ mod tests {
     #[test]
     fn rejects_empty_and_oversized_requests() {
         assert!(validate_request(&request("   ")).is_err());
-        assert!(validate_request(&request(&"x".repeat(2_001))).is_err());
+        assert!(validate_request(&request(&"x".repeat(512))).is_ok());
+        assert!(validate_request(&request(&"x".repeat(513))).is_err());
     }
 
     #[test]
@@ -436,5 +544,37 @@ mod tests {
             HeaderValue::from_static("not-an-id"),
         );
         assert!(request_fingerprint(&headers).is_err());
+    }
+
+    #[test]
+    fn permits_anonymous_requests_when_client_limits_are_disabled() {
+        assert_eq!(
+            request_limit_fingerprints(&HeaderMap::new(), false, false).unwrap(),
+            (None, None)
+        );
+        assert!(request_limit_fingerprints(&HeaderMap::new(), true, false).is_err());
+    }
+
+    #[test]
+    fn reports_all_usage_limits() {
+        let response = with_usage_headers(
+            StatusCode::OK.into_response(),
+            UsageHeaders {
+                monthly: Some((1_000, 999)),
+                minute: Some((20, 19)),
+                daily_ip: Some((100, 99)),
+                global_daily: Some((5_000, 4_999)),
+            },
+        );
+        let headers = response.headers();
+
+        assert_eq!(headers["x-ratelimit-limit"], "1000");
+        assert_eq!(headers["x-ratelimit-remaining"], "999");
+        assert_eq!(headers["x-ratelimit-minute-limit"], "20");
+        assert_eq!(headers["x-ratelimit-minute-remaining"], "19");
+        assert_eq!(headers["x-ratelimit-daily-ip-limit"], "100");
+        assert_eq!(headers["x-ratelimit-daily-ip-remaining"], "99");
+        assert_eq!(headers["x-ratelimit-global-daily-limit"], "5000");
+        assert_eq!(headers["x-ratelimit-global-daily-remaining"], "4999");
     }
 }
