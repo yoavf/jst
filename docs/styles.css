@@ -227,7 +227,46 @@ h1 {
   transform: rotate(-0.08deg);
 }
 
+.translation-map {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.translation-map path {
+  fill: none;
+  stroke: var(--orange);
+  stroke-dasharray: var(--path-length);
+  stroke-dashoffset: var(--path-length);
+  stroke-linecap: round;
+  stroke-width: 2.2;
+  transition: stroke-dashoffset 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease;
+  opacity: 0.72;
+}
+
+.translation-map.is-drawing path {
+  stroke-dashoffset: 0;
+}
+
+.translation-map circle {
+  fill: var(--orange);
+  transform: scale(0);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 180ms ease 260ms;
+}
+
+.translation-map.is-drawing circle {
+  transform: scale(1);
+}
+
 .terminal-line {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 1.1rem;
@@ -237,8 +276,43 @@ h1 {
   white-space: nowrap;
 }
 
+.request-part[data-map] {
+  border-radius: 0.16rem;
+  transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.request-part.is-mapping {
+  color: var(--blue-dark);
+  background: rgb(255 255 255 / 52%);
+  box-shadow: 0 2px 0 var(--orange);
+}
+
+.result-part {
+  display: inline-block;
+  transform: translateY(-0.55rem) rotate(-1.5deg);
+  transition:
+    opacity 180ms ease,
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms ease;
+  opacity: 0;
+  white-space: pre;
+}
+
+.result-part.is-visible {
+  transform: translateY(0) rotate(0);
+  opacity: 1;
+}
+
+.result-part.is-mapping {
+  color: var(--blue-dark);
+}
+
+#result {
+  position: relative;
+}
+
 .terminal-line--result {
-  margin-top: 1.25rem;
+  margin-top: 2.55rem;
   transition: opacity 160ms ease;
   opacity: 0;
 }
@@ -1034,5 +1108,9 @@ h3 {
 
   .terminal-cursor {
     animation: none;
+  }
+
+  .translation-map {
+    display: none;
   }
 }

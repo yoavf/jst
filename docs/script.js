@@ -1,39 +1,57 @@
 const examples = [
   {
-    request: "jst find all files bigger than 500 mb in ~/downloads",
-    result: "find ~/downloads -type f -size +500M",
+    requestParts: [
+      { text: "jst " },
+      { text: "find all files", map: "files" },
+      { text: " bigger than 500 mb", map: "size" },
+      { text: " in ~/downloads", map: "place" },
+    ],
+    resultParts: [
+      { text: "find", map: "files" },
+      { text: " ~/downloads", map: "place" },
+      { text: " -type f", map: "files" },
+      { text: " -size +500M", map: "size" },
+    ],
+    mapOrder: ["files", "size", "place"],
   },
   {
-    request: "jst show me what's using port 3000",
-    result: "lsof -i :3000",
+    requestParts: [
+      { text: "jst " },
+      { text: "show me what's using", map: "process" },
+      { text: " port 3000", map: "port" },
+    ],
+    resultParts: [
+      { text: "lsof", map: "process" },
+      { text: " -i :3000", map: "port" },
+    ],
+    mapOrder: ["process", "port"],
   },
   {
-    request: "jst show the 10 largest files in this folder",
-    result: "du -ah . | sort -hr | head -n 10",
+    requestParts: [
+      { text: "jst " },
+      { text: "show the 10", map: "limit" },
+      { text: " largest", map: "sort" },
+      { text: " files in this folder", map: "measure" },
+    ],
+    resultParts: [
+      { text: "du -ah .", map: "measure" },
+      { text: " | sort -hr", map: "sort" },
+      { text: " | head -n 10", map: "limit" },
+    ],
+    mapOrder: ["limit", "sort", "measure"],
   },
   {
-    request: "jst find every TODO in rust files",
-    result: "rg --glob '*.rs' TODO",
-  },
-  {
-    request: "jst list git branches by most recent activity",
-    result: "git branch --sort=-committerdate",
-  },
-  {
-    request: "jst find files changed in the last 24 hours",
-    result: "find . -type f -mtime -1",
-  },
-  {
-    request: "jst make a receipts folder and move all PDFs into it",
-    result: "mkdir -p receipts && mv -- *.pdf receipts/",
-  },
-  {
-    request: "jst show the last 20 lines of my application log",
-    result: "tail -n 20 application.log",
-  },
-  {
-    request: "jst count the lines in every rust file",
-    result: "find . -name '*.rs' -print0 | xargs -0 wc -l",
+    requestParts: [
+      { text: "jst " },
+      { text: "find every TODO", map: "search" },
+      { text: " in rust files", map: "rust" },
+    ],
+    resultParts: [
+      { text: "rg", map: "search" },
+      { text: " --glob '*.rs'", map: "rust" },
+      { text: " TODO", map: "search" },
+    ],
+    mapOrder: ["search", "rust"],
   },
 ];
 
@@ -47,6 +65,7 @@ const copyState = document.querySelector(".copy-state");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const cursorElement = document.querySelector(".terminal-cursor");
 const spinnerElement = document.querySelector(".terminal-spinner");
+const mapElement = document.querySelector(".translation-map");
 
 let exampleIndex = 0;
 let animationRun = 0;
@@ -68,6 +87,88 @@ async function typeText(element, value, delay, run) {
     await wait(delay);
   }
 
+  return true;
+}
+
+function exampleText(parts) {
+  return parts.map(({ text }) => text).join("");
+}
+
+function renderParts(element, parts, className) {
+  element.replaceChildren(
+    ...parts.map(({ text, map }) => {
+      const part = document.createElement("span");
+      part.textContent = text;
+      part.className = className;
+      if (map) part.dataset.map = map;
+      return part;
+    }),
+  );
+}
+
+function clearMap() {
+  mapElement.replaceChildren();
+  mapElement.classList.remove("is-drawing");
+  translationElement.querySelectorAll(".is-mapping").forEach((part) => {
+    part.classList.remove("is-mapping");
+  });
+}
+
+function drawMap(map) {
+  clearMap();
+
+  const source = requestElement.querySelector(`[data-map="${map}"]`);
+  const targets = resultElement.querySelectorAll(`[data-map="${map}"]`);
+  if (!source || targets.length === 0) return;
+
+  const containerRect = translationElement.getBoundingClientRect();
+  const sourceRect = source.getBoundingClientRect();
+  source.classList.add("is-mapping");
+
+  mapElement.setAttribute("viewBox", `0 0 ${containerRect.width} ${containerRect.height}`);
+
+  targets.forEach((target) => {
+    const targetRect = target.getBoundingClientRect();
+    const startX = sourceRect.left + sourceRect.width / 2 - containerRect.left;
+    const startY = sourceRect.bottom - containerRect.top + 4;
+    const endX = targetRect.left + targetRect.width / 2 - containerRect.left;
+    const endY = targetRect.top - containerRect.top - 5;
+    const bend = Math.max(16, Math.abs(endY - startY) * 0.48);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+    path.setAttribute(
+      "d",
+      `M ${startX} ${startY} C ${startX} ${startY + bend}, ${endX} ${endY - bend}, ${endX} ${endY}`,
+    );
+    mapElement.append(path);
+    path.style.setProperty("--path-length", path.getTotalLength());
+    target.classList.add("is-mapping");
+
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("cx", endX);
+    dot.setAttribute("cy", endY);
+    dot.setAttribute("r", "2.5");
+    mapElement.append(dot);
+  });
+
+  window.requestAnimationFrame(() => mapElement.classList.add("is-drawing"));
+}
+
+async function assembleResult(example, run) {
+  renderParts(resultElement, example.resultParts, "result-part");
+  resultLine.classList.add("is-visible");
+
+  for (const map of example.mapOrder) {
+    if (run !== animationRun) return false;
+    drawMap(map);
+    await wait(80);
+    resultElement.querySelectorAll(`[data-map="${map}"]`).forEach((part) => {
+      part.classList.add("is-visible");
+    });
+    await wait(520);
+  }
+
+  clearMap();
   return true;
 }
 
@@ -98,18 +199,22 @@ function stopSpinner() {
 
 async function showExample(index, animate = true) {
   const example = examples[index];
+  const request = exampleText(example.requestParts);
+  const result = exampleText(example.resultParts);
   const run = ++animationRun;
   translationElement.setAttribute(
     "aria-label",
-    `JST turns ${example.request} into the shell command ${example.result}`,
+    `JST turns ${request} into the shell command ${result}`,
   );
 
   cursorElement.classList.remove("is-hidden");
   stopSpinner();
+  translationElement.classList.remove("is-loading");
+  clearMap();
 
   if (!animate || reduceMotion.matches) {
-    requestElement.textContent = example.request;
-    resultElement.textContent = example.result;
+    requestElement.textContent = request;
+    resultElement.textContent = result;
     resultLine.classList.add("is-visible");
     cursorElement.classList.add("is-hidden");
     resetAutoRotate();
@@ -121,23 +226,27 @@ async function showExample(index, animate = true) {
   resultLine.classList.remove("is-visible");
 
   await wait(220);
-  const requestFinished = await typeText(requestElement, example.request, 24, run);
+  const requestFinished = await typeText(requestElement, request, 24, run);
   if (!requestFinished || run !== animationRun) return;
 
+  renderParts(requestElement, example.requestParts, "request-part");
   cursorElement.classList.add("is-hidden");
-  resultLine.classList.add("is-visible");
   translationElement.classList.add("is-loading");
   startSpinner();
 
-  await wait(1200);
+  await wait(720);
   if (run !== animationRun) return;
   stopSpinner();
   translationElement.classList.remove("is-loading");
-  await typeText(resultElement, example.result, 17, run);
-  resetAutoRotate();
+  const resultFinished = await assembleResult(example, run);
+  if (resultFinished) resetAutoRotate();
 }
 
 anotherButton?.addEventListener("click", () => {
+  if (autoRotateTimer) {
+    clearTimeout(autoRotateTimer);
+    autoRotateTimer = null;
+  }
   exampleIndex = (exampleIndex + 1) % examples.length;
   showExample(exampleIndex);
 });
@@ -155,9 +264,8 @@ copyButton?.addEventListener("click", async () => {
 });
 
 window.requestAnimationFrame(() => {
-  exampleIndex = Math.floor(Math.random() * examples.length);
+  exampleIndex = 0;
   showExample(exampleIndex);
-  resetAutoRotate();
 });
 
 // --- Live usage stats -------------------------------------------------
