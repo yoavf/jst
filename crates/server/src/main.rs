@@ -209,6 +209,10 @@ async fn translate(
         Err(LimitFailure::Capacity) => return busy_response(),
     }
 
+    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
+        return with_usage_headers(busy_response(), usage);
+    };
+
     match check_limit(
         &state.usage_limiter,
         installation_fingerprint.as_deref().unwrap_or(""),
@@ -237,10 +241,6 @@ async fn translate(
         }
         Err(LimitFailure::Capacity) => return busy_response(),
     }
-
-    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
-        return with_usage_headers(busy_response(), usage);
-    };
 
     let response = match openai_compatible::translate(
         &state.client,
