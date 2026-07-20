@@ -3,6 +3,7 @@ mod safety;
 
 use clap::Parser;
 use jst_shared::{TranslateRequest, TranslateResponse};
+use std::fmt;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process::Command;
@@ -29,22 +30,67 @@ struct Cli {
     prompt: Vec<String>,
 }
 
+#[derive(Debug)]
+enum JstError {
+    Network,
+    Server(u16),
+    Deserialization,
+    Other(String),
+}
+
+impl fmt::Display for JstError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            JstError::Network => write!(
+                f,
+                "couldn't reach the jst server — check your connection and try again"
+            ),
+            JstError::Server(429) => write!(
+                f,
+                "rate limit reached — slow down, or run your own jst server"
+            ),
+            JstError::Server(code) => write!(
+                f,
+                "the jst server is having trouble (HTTP {code}); try again in a moment"
+            ),
+            JstError::Deserialization => {
+                write!(f, "got an unexpected response from the jst server")
+            }
+            JstError::Other(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for JstError {}
+
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() {
+    if let Err(error) = run().await {
+        let color = should_use_color();
+        eprintln!("{}", format_error(&error, color));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), JstError> {
     let cli = Cli::parse();
     let input = cli.prompt.join(" ");
     let response = translate(&input).await?;
     let command = clean_command(&response.command);
 
     if command.is_empty() || command.starts_with("# unable to translate") {
-        return Err("unable to translate request".into());
+        return Err(JstError::Other("unable to translate request".to_string()));
     }
     if contains_unsafe_terminal_character(&command) {
-        return Err("generated command contains unsafe terminal characters".into());
+        return Err(JstError::Other(
+            "generated command contains unsafe terminal characters".to_string(),
+        ));
     }
 
     println!("→ {command}");
-    io::stdout().flush()?;
+    io::stdout()
+        .flush()
+        .map_err(|error| JstError::Other(format!("{error}")))?;
 
     let local_warnings = safety::warnings_for_command(&command);
     let model_warnings = response.model_warnings();
@@ -67,9 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     execute_command(&command)
 }
 
-async fn translate(
-    input: &str,
-) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
+async fn translate(input: &str) -> Result<TranslateResponse, JstError> {
     let request = TranslateRequest {
         input: input.to_string(),
         os: Some(std::env::consts::OS.to_string()),
@@ -79,23 +123,26 @@ async fn translate(
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(30))
-        .build()?;
-    let installation_id = installation::installation_id()?;
+        .build()
+        .map_err(|_| JstError::Network)?;
+    let installation_id =
+        installation::installation_id().map_err(|error| JstError::Other(format!("{error}")))?;
 
     let response = client
         .post(api_url)
         .header(INSTALLATION_ID_HEADER, installation_id)
         .json(&request)
         .send()
-        .await?;
+        .await
+        .map_err(|_| JstError::Network)?;
     let status = response.status();
     let body = read_limited_body(response, MAX_RESPONSE_BYTES).await?;
 
     if !status.is_success() {
-        return Err(format!("translation service returned {status}").into());
+        return Err(JstError::Server(status.as_u16()));
     }
 
-    Ok(serde_json::from_str(&body)?)
+    serde_json::from_str(&body).map_err(|_| JstError::Deserialization)
 }
 
 fn clean_command(command: &str) -> String {
@@ -228,62 +275,81 @@ fn wrap_text(value: &str, width: usize) -> Vec<String> {
 async fn read_limited_body(
     mut response: reqwest::Response,
     limit: usize,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, JstError> {
     if response
         .content_length()
         .is_some_and(|length| length > limit as u64)
     {
-        return Err("translation response exceeded size limit".into());
+        return Err(JstError::Network);
     }
 
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await? {
+    while let Some(chunk) = response.chunk().await.map_err(|_| JstError::Network)? {
         if body.len() + chunk.len() > limit {
-            return Err("translation response exceeded size limit".into());
+            return Err(JstError::Network);
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(String::from_utf8(body)?)
+    String::from_utf8(body).map_err(|_| JstError::Deserialization)
 }
 
-fn confirm() -> io::Result<bool> {
+fn confirm() -> Result<bool, JstError> {
     eprint!("Run it? [y/N] ");
-    io::stderr().flush()?;
+    io::stderr()
+        .flush()
+        .map_err(|error| JstError::Other(format!("{error}")))?;
 
     let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| JstError::Other(format!("{error}")))?;
     Ok(matches!(
         answer.trim().to_ascii_lowercase().as_str(),
         "y" | "yes"
     ))
 }
 
-fn execute_command(command: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn execute_command(command: &str) -> Result<(), JstError> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         let error = Command::new(shell).arg("-c").arg(command).exec();
-        Err(format!("failed to execute command: {error}").into())
+        Err(JstError::Other(format!(
+            "failed to execute command: {error}"
+        )))
     }
 
     #[cfg(not(unix))]
     {
-        let status = Command::new(shell).arg("-c").arg(command).status()?;
+        let status = Command::new(shell)
+            .arg("-c")
+            .arg(command)
+            .status()
+            .map_err(|error| JstError::Other(format!("failed to execute command: {error}")))?;
         if status.success() {
             Ok(())
         } else {
-            Err(format!("command exited with {status}").into())
+            Err(JstError::Other(format!("command exited with {status}")))
         }
+    }
+}
+
+fn format_error(error: &JstError, color: bool) -> String {
+    let message = format!("jst: {error}");
+    if color {
+        format!("\x1b[1;31m{message}\x1b[0m")
+    } else {
+        message
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_command, contains_unsafe_terminal_character, format_warning, indent_wrapped,
-        should_confirm, terminal_safe, Cli,
+        clean_command, contains_unsafe_terminal_character, format_error, format_warning,
+        indent_wrapped, should_confirm, terminal_safe, Cli, JstError,
     };
     use clap::Parser;
 
@@ -378,5 +444,37 @@ mod tests {
         assert!(contains_unsafe_terminal_character("echo \u{202e}txt"));
         assert!(!contains_unsafe_terminal_character("echo safe"));
         assert_eq!(terminal_safe("line\nnext\u{1b}"), "line\\nnext\\u{1b}");
+    }
+
+    #[test]
+    fn describes_errors_in_plain_language() {
+        assert_eq!(
+            JstError::Network.to_string(),
+            "couldn't reach the jst server — check your connection and try again"
+        );
+        assert_eq!(
+            JstError::Server(429).to_string(),
+            "rate limit reached — slow down, or run your own jst server"
+        );
+        assert_eq!(
+            JstError::Server(502).to_string(),
+            "the jst server is having trouble (HTTP 502); try again in a moment"
+        );
+        assert_eq!(
+            JstError::Deserialization.to_string(),
+            "got an unexpected response from the jst server"
+        );
+    }
+
+    #[test]
+    fn wraps_error_messages_with_jst_prefix() {
+        assert_eq!(
+            format_error(&JstError::Server(502), false),
+            "jst: the jst server is having trouble (HTTP 502); try again in a moment"
+        );
+        assert_eq!(
+            format_error(&JstError::Server(502), true),
+            "\x1b[1;31mjst: the jst server is having trouble (HTTP 502); try again in a moment\x1b[0m"
+        );
     }
 }
