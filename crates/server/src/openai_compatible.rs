@@ -1,9 +1,12 @@
 use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
 
-const MAX_LLM_RESPONSE_BYTES: usize = 4 * 1024;
+const MAX_LLM_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_EXPLANATION_BYTES: usize = 1024;
+// Headroom for reasoning-capable models: thinking tokens count against
+// max_tokens on some providers, and a small budget truncates the JSON output.
+const MAX_OUTPUT_TOKENS: u32 = 2048;
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -33,6 +36,7 @@ struct ChatResponse {
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: Message,
+    finish_reason: Option<String>,
 }
 
 pub async fn translate(
@@ -57,7 +61,7 @@ pub async fn translate(
             },
         ],
         temperature: 0.0,
-        max_tokens: 256,
+        max_tokens: MAX_OUTPUT_TOKENS,
         response_format: ResponseFormat {
             r#type: "json_object".to_string(),
         },
@@ -80,14 +84,18 @@ pub async fn translate(
 
     let chat_response: ChatResponse = serde_json::from_str(&body)?;
 
-    let content = chat_response
+    let choice = chat_response
         .choices
         .first()
-        .map(|choice| choice.message.content.trim())
         .ok_or("LLM API returned no choices")?;
-    let content = strip_code_fence(content);
+    let content = strip_code_fence(choice.message.content.trim());
 
-    let response = serde_json::from_str(content)?;
+    let response = serde_json::from_str(content).map_err(|error| {
+        format!(
+            "failed to parse model response (finish_reason: {:?}): {error}",
+            choice.finish_reason
+        )
+    })?;
     validate_translation_response(&response)?;
     Ok(response)
 }

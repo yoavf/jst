@@ -225,7 +225,7 @@ async fn request_translation(
             },
         ],
         temperature: 0.0,
-        max_tokens: 256,
+        max_tokens: 2048,
         response_format: ResponseFormat {
             r#type: "json_object".to_string(),
         },
