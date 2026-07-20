@@ -24,11 +24,13 @@ retries, and hosting costs.
 
 `*` Reasoning tokens can reduce the real command count.
 
-Gemini 2.5 Flash Lite is the selected default because it was the fastest model
-with perfect repeated accuracy. Granite 4.1 8B is the strongest cost-optimized
-alternative. A post-review run with all response fields required also passed
-8/8 command and 8/8 effect cases at 0.77s average. Model and provider
-performance varies over time, so rerun:
+Granite 4.1 8B is the selected default. A follow-up worktree test exposed a
+correctness gap not covered by the original suite: Granite generated a complete
+`git worktree add` command 5/5 times at 1.14s average, while Gemini omitted the
+required worktree path 5/5 times at 1.35s average. Granite also passed a
+post-review run with all response fields required at 8/8 commands and 8/8
+effect classifications. Model and provider performance varies over time, so
+rerun:
 
 ```sh
 OPENROUTER_API_KEY=... cargo run -p jst-server --example benchmark_models
