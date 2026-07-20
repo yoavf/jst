@@ -21,26 +21,41 @@ Use `--yolo` to skip all safety confirmations:
 jst --yolo remove all stopped docker containers
 ```
 
+## Server
+
+By default, the CLI sends translation requests to the hosted JST server. The
+proxy keeps provider credentials out of the distributed binary and lets JST
+change models, prompts, and provider settings without requiring users to
+install a new CLI release. The generated command is still checked locally
+before execution.
+
+You do not have to use the hosted proxy. Run the bundled OpenRouter server with
+your own API key:
+
+```sh
+OPENROUTER_API_KEY=... \
+OPENROUTER_MODEL=google/gemini-2.5-flash-lite \
+cargo run --release -p jst-server
+```
+
+Then point the CLI at it:
+
+```sh
+JST_API_URL=http://127.0.0.1:8080/translate jst find large files
+```
+
+The server listens on `PORT` (default `8080`).
+`MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.
+The bundled server currently uses OpenRouter, but `JST_API_URL` can point to any
+service implementing JST's `/translate` JSON contract, including a custom
+adapter for Ollama or another local model.
+
 ## Development
 
-GitHub Actions runs formatting and workspace tests on every pull request and
-push to `main`.
+GitHub Actions runs formatting, build, tests, and Clippy on every pull request
+and push to `main`.
 
 ```sh
 cargo test --workspace
 cargo build --workspace
-```
-
-Run the API server locally with an OpenRouter key:
-
-```sh
-OPENROUTER_API_KEY=... OPENROUTER_MODEL=... cargo run -p jst-server
-JST_API_URL=http://localhost:8080/translate cargo run -p jst-cli -- find large files
-```
-
-Benchmark the shortlisted OpenRouter models for latency, command quality, and
-effect classification:
-
-```sh
-OPENROUTER_API_KEY=... cargo run -p jst-server --example benchmark_models
 ```
