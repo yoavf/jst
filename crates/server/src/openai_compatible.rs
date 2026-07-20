@@ -1,7 +1,9 @@
 use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
 
-const MAX_LLM_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_LLM_RESPONSE_BYTES: usize = 4 * 1024;
+const MAX_COMMAND_BYTES: usize = 2 * 1024;
+const MAX_EXPLANATION_BYTES: usize = 1024;
 
 #[derive(Debug, Serialize)]
 struct ChatRequest {
@@ -55,7 +57,7 @@ pub async fn translate(
             },
         ],
         temperature: 0.0,
-        max_tokens: 512,
+        max_tokens: 256,
         response_format: ResponseFormat {
             r#type: "json_object".to_string(),
         },
@@ -85,7 +87,19 @@ pub async fn translate(
         .ok_or("LLM API returned no choices")?;
     let content = strip_code_fence(content);
 
-    Ok(serde_json::from_str(content)?)
+    let response = serde_json::from_str(content)?;
+    validate_translation_response(&response)?;
+    Ok(response)
+}
+
+fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'static str> {
+    if response.command.is_empty() || response.command.len() > MAX_COMMAND_BYTES {
+        return Err("LLM command exceeded size limit");
+    }
+    if response.explanation.len() > MAX_EXPLANATION_BYTES {
+        return Err("LLM explanation exceeded size limit");
+    }
+    Ok(())
 }
 
 fn strip_code_fence(content: &str) -> &str {
@@ -127,7 +141,17 @@ async fn read_limited_body(
 
 #[cfg(test)]
 mod tests {
-    use super::strip_code_fence;
+    use super::{strip_code_fence, validate_translation_response};
+    use jst_shared::{CommandEffects, TranslateResponse};
+
+    fn response(command: String, explanation: String) -> TranslateResponse {
+        TranslateResponse {
+            command,
+            effects: CommandEffects::default(),
+            matches_request: true,
+            explanation,
+        }
+    }
 
     #[test]
     fn strips_json_code_fences() {
@@ -148,5 +172,18 @@ mod tests {
     #[test]
     fn handles_short_fences_without_panicking() {
         assert_eq!(strip_code_fence("```"), "");
+    }
+
+    #[test]
+    fn rejects_oversized_translation_fields() {
+        assert!(validate_translation_response(&response("pwd".to_string(), String::new())).is_ok());
+        assert!(validate_translation_response(&response(String::new(), String::new())).is_err());
+        assert!(
+            validate_translation_response(&response("x".repeat(2 * 1024 + 1), String::new()))
+                .is_err()
+        );
+        assert!(
+            validate_translation_response(&response("pwd".to_string(), "x".repeat(1025))).is_err()
+        );
     }
 }

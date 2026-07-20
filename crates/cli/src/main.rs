@@ -3,7 +3,7 @@ mod safety;
 
 use clap::Parser;
 use jst_shared::{TranslateRequest, TranslateResponse};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -11,6 +11,7 @@ use std::time::Duration;
 const DEFAULT_API_URL: &str = "https://jst-server.fly.dev/translate";
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const INSTALLATION_ID_HEADER: &str = "x-jst-installation-id";
+const CONFIRMATION_WIDTH: usize = 88;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -50,10 +51,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if should_confirm(cli.yolo, &local_warnings, &model_warnings) {
         if !response.explanation.is_empty() {
             let explanation = terminal_safe(&response.explanation);
-            eprintln!("\n{explanation}");
+            eprintln!("\n{}", indent_wrapped(&explanation, CONFIRMATION_WIDTH));
         }
+        let color = should_use_color();
+        eprintln!();
         for warning in local_warnings.iter().chain(&model_warnings) {
-            eprintln!("⚠ {warning}");
+            eprintln!("{}", format_warning(warning, CONFIRMATION_WIDTH, color));
         }
         if !confirm()? {
             eprintln!("Aborted.");
@@ -162,6 +165,66 @@ fn terminal_safe(value: &str) -> String {
     escaped
 }
 
+fn should_use_color() -> bool {
+    io::stderr().is_terminal()
+        && std::env::var_os("NO_COLOR").is_none()
+        && std::env::var("TERM").map_or(true, |term| term != "dumb")
+}
+
+fn indent_wrapped(value: &str, width: usize) -> String {
+    wrap_text(value, width.saturating_sub(2))
+        .into_iter()
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_warning(value: &str, width: usize, color: bool) -> String {
+    let wrapped = wrap_text(value, width.saturating_sub(2));
+    let warning = wrapped
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if index == 0 {
+                format!("⚠ {line}")
+            } else {
+                format!("  {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if color {
+        format!("\x1b[1;31m{warning}\x1b[0m")
+    } else {
+        warning
+    }
+}
+
+fn wrap_text(value: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for word in value.split_whitespace() {
+        let separator = usize::from(!current.is_empty());
+        if !current.is_empty() && current.chars().count() + separator + word.chars().count() > width
+        {
+            lines.push(current);
+            current = String::new();
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    lines
+}
+
 async fn read_limited_body(
     mut response: reqwest::Response,
     limit: usize,
@@ -219,7 +282,8 @@ fn execute_command(command: &str) -> Result<(), Box<dyn std::error::Error + Send
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_command, contains_unsafe_terminal_character, should_confirm, terminal_safe, Cli,
+        clean_command, contains_unsafe_terminal_character, format_warning, indent_wrapped,
+        should_confirm, terminal_safe, Cli,
     };
     use clap::Parser;
 
@@ -234,6 +298,34 @@ mod tests {
     #[test]
     fn trims_plain_commands() {
         assert_eq!(clean_command("  pwd\n"), "pwd");
+    }
+
+    #[test]
+    fn wraps_and_indents_explanations() {
+        let formatted = indent_wrapped(
+            "This command finds all files within the specified directory and deletes them.",
+            32,
+        );
+
+        assert_eq!(
+            formatted,
+            "  This command finds all files\n  within the specified directory\n  and deletes them."
+        );
+        assert!(formatted.lines().all(|line| line.chars().count() <= 32));
+    }
+
+    #[test]
+    fn formats_warnings_with_optional_color() {
+        let plain = "⚠ This warning describes\n  a destructive command";
+
+        assert_eq!(
+            format_warning("This warning describes a destructive command", 24, false),
+            plain
+        );
+        assert_eq!(
+            format_warning("This warning describes a destructive command", 24, true),
+            format!("\x1b[1;31m{plain}\x1b[0m")
+        );
     }
 
     #[test]
