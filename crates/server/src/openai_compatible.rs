@@ -1,5 +1,6 @@
 use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 const MAX_LLM_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_BYTES: usize = 2 * 1024;
@@ -46,6 +47,34 @@ pub async fn translate(
     model: &str,
     req: &TranslateRequest,
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
+    let max_retries = 1;
+    for attempt in 0..=max_retries {
+        match call_llm(client, api_url, api_key, model, req).await {
+            Ok(response) => return Ok(response),
+            Err((error, finish_reason)) if finish_reason.as_deref() == Some("error") => {
+                if attempt < max_retries {
+                    warn!(
+                        attempt,
+                        error = %error,
+                        "LLM returned finish_reason=error, retrying"
+                    );
+                    continue;
+                }
+                return Err(error);
+            }
+            Err((error, _)) => return Err(error),
+        }
+    }
+    unreachable!()
+}
+
+async fn call_llm(
+    client: &reqwest::Client,
+    api_url: &str,
+    api_key: &str,
+    model: &str,
+    req: &TranslateRequest,
+) -> Result<TranslateResponse, (Box<dyn std::error::Error + Send + Sync>, Option<String>)> {
     let system_prompt = build_system_prompt(req.os.as_deref(), req.shell.as_deref());
 
     let chat_request = ChatRequest {
@@ -73,31 +102,48 @@ pub async fn translate(
     } else {
         request.bearer_auth(api_key)
     };
-    let response = request.send().await?;
+    let response = request.send().await.map_err(|e| (e.into(), None))?;
 
     let status = response.status();
-    let body = read_limited_body(response, MAX_LLM_RESPONSE_BYTES).await?;
+    let body = read_limited_body(response, MAX_LLM_RESPONSE_BYTES)
+        .await
+        .map_err(|e| (e, None))?;
 
     if !status.is_success() {
-        return Err(format!("LLM API returned {status}").into());
+        return Err((format!("LLM API returned {status}").into(), None));
     }
 
-    let chat_response: ChatResponse = serde_json::from_str(&body)?;
+    let chat_response: ChatResponse = serde_json::from_str(&body).map_err(|e| (e.into(), None))?;
 
     let choice = chat_response
         .choices
         .first()
-        .ok_or("LLM API returned no choices")?;
+        .ok_or(("LLM API returned no choices".into(), None))?;
     let content = strip_code_fence(choice.message.content.trim());
 
-    let response = serde_json::from_str(content).map_err(|error| {
-        format!(
-            "failed to parse model response (finish_reason: {:?}): {error}",
-            choice.finish_reason
-        )
-    })?;
-    validate_translation_response(&response)?;
-    Ok(response)
+    serde_json::from_str::<TranslateResponse>(content)
+        .map_err(|error| {
+            let finish_reason = choice.finish_reason.clone();
+            warn!(
+                finish_reason = ?choice.finish_reason,
+                content_length = content.len(),
+                content_preview = %content.chars().take(200).collect::<String>(),
+                "failed to parse LLM response"
+            );
+            (
+                format!(
+                    "failed to parse model response (finish_reason: {:?}): {error}",
+                    finish_reason
+                )
+                .into(),
+                finish_reason,
+            )
+        })
+        .and_then(|response| {
+            validate_translation_response(&response)
+                .map_err(|e| (e.into(), choice.finish_reason.clone()))?;
+            Ok(response)
+        })
 }
 
 fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'static str> {
