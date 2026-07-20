@@ -896,7 +896,7 @@ h3 {
   }
 
   .quick-start-sheet {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .quick-start-steps,
@@ -1014,7 +1014,7 @@ h3 {
   }
 
   .quick-start-steps li {
-    grid-template-columns: 2.5rem 1fr;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
   }
 
   .usage-sheet {
