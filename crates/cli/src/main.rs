@@ -22,8 +22,12 @@ const CONFIRMATION_WIDTH: usize = 88;
 )]
 struct Cli {
     /// Skip all safety confirmations
-    #[arg(long)]
+    #[arg(long, conflicts_with = "dry")]
     yolo: bool,
+
+    /// Require confirmation before running the generated command
+    #[arg(long)]
+    dry: bool,
 
     /// What you want to do, in plain English
     #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
@@ -126,7 +130,7 @@ async fn run() -> Result<(), JstError> {
 
     let local_warnings = safety::warnings_for_command(&command);
     let model_warnings = response.model_warnings();
-    if should_confirm(cli.yolo, &local_warnings, &model_warnings) {
+    if should_confirm(cli.yolo, cli.dry, &local_warnings, &model_warnings) {
         if !response.explanation.is_empty() {
             let explanation = terminal_safe(&response.explanation);
             eprintln!("\n{}", indent_wrapped(&explanation, CONFIRMATION_WIDTH));
@@ -212,8 +216,8 @@ fn shell_name() -> Option<String> {
     })
 }
 
-fn should_confirm(yolo: bool, local_warnings: &[&str], model_warnings: &[&str]) -> bool {
-    !yolo && (!local_warnings.is_empty() || !model_warnings.is_empty())
+fn should_confirm(yolo: bool, dry: bool, local_warnings: &[&str], model_warnings: &[&str]) -> bool {
+    !yolo && (dry || !local_warnings.is_empty() || !model_warnings.is_empty())
 }
 
 fn contains_unsafe_terminal_character(value: &str) -> bool {
@@ -447,6 +451,7 @@ mod tests {
             "find all files bigger than 500 mb in ~/downloads"
         );
         assert!(!cli.yolo);
+        assert!(!cli.dry);
     }
 
     #[test]
@@ -457,16 +462,29 @@ mod tests {
     }
 
     #[test]
+    fn accepts_dry_before_prompt() {
+        let cli = Cli::try_parse_from(["jst", "--dry", "show", "current", "directory"])
+            .expect("valid arguments");
+        assert!(cli.dry);
+    }
+
+    #[test]
+    fn rejects_dry_with_yolo() {
+        assert!(Cli::try_parse_from(["jst", "--dry", "--yolo", "show", "files"]).is_err());
+    }
+
+    #[test]
     fn rejects_missing_prompt() {
         assert!(Cli::try_parse_from(["jst"]).is_err());
     }
 
     #[test]
     fn confirmation_policy_combines_both_warning_sources() {
-        assert!(!should_confirm(false, &[], &[]));
-        assert!(should_confirm(false, &["local"], &[]));
-        assert!(should_confirm(false, &[], &["model"]));
-        assert!(!should_confirm(true, &["local"], &["model"]));
+        assert!(!should_confirm(false, false, &[], &[]));
+        assert!(should_confirm(false, false, &["local"], &[]));
+        assert!(should_confirm(false, false, &[], &["model"]));
+        assert!(should_confirm(false, true, &[], &[]));
+        assert!(!should_confirm(true, false, &["local"], &["model"]));
     }
 
     #[test]
