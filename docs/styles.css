@@ -297,6 +297,10 @@ h1 {
   display: inline;
 }
 
+.translation.is-loading .terminal-output {
+  display: none;
+}
+
 .translation.is-loading .terminal-cursor {
   display: none;
 }
@@ -519,11 +523,11 @@ h3 {
 
 .hand-heart {
   display: inline-block;
-  margin-left: 0.18rem;
+  margin-left: 0.02rem;
   color: var(--blue);
   font-size: 1.45em;
   line-height: 0;
-  transform: rotate(-12deg) translateY(0.08em);
+  transform: rotate(2deg) translate(-6px, 0.32em);
 }
 
 .quick-start {

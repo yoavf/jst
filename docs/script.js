@@ -45,9 +45,15 @@ const anotherButton = document.querySelector(".another-example");
 const copyButton = document.querySelector(".install-command");
 const copyState = document.querySelector(".copy-state");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const cursorElement = document.querySelector(".terminal-cursor");
+const spinnerElement = document.querySelector(".terminal-spinner");
 
 let exampleIndex = 0;
 let animationRun = 0;
+let autoRotateTimer = null;
+let spinnerTimer = null;
+const AUTO_ROTATE_DELAY = 5000;
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function wait(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -65,6 +71,31 @@ async function typeText(element, value, delay, run) {
   return true;
 }
 
+function resetAutoRotate() {
+  if (autoRotateTimer) clearTimeout(autoRotateTimer);
+  autoRotateTimer = setTimeout(() => {
+    exampleIndex = (exampleIndex + 1) % examples.length;
+    showExample(exampleIndex);
+  }, AUTO_ROTATE_DELAY);
+}
+
+function startSpinner() {
+  let frameIndex = 0;
+  spinnerElement.textContent = SPINNER_FRAMES[0];
+  spinnerTimer = setInterval(() => {
+    frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
+    spinnerElement.textContent = SPINNER_FRAMES[frameIndex];
+  }, 80);
+}
+
+function stopSpinner() {
+  if (spinnerTimer) {
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
+  }
+  spinnerElement.textContent = "";
+}
+
 async function showExample(index, animate = true) {
   const example = examples[index];
   const run = ++animationRun;
@@ -73,10 +104,15 @@ async function showExample(index, animate = true) {
     `JST turns ${example.request} into the shell command ${example.result}`,
   );
 
+  cursorElement.classList.remove("is-hidden");
+  stopSpinner();
+
   if (!animate || reduceMotion.matches) {
     requestElement.textContent = example.request;
     resultElement.textContent = example.result;
     resultLine.classList.add("is-visible");
+    cursorElement.classList.add("is-hidden");
+    resetAutoRotate();
     return;
   }
 
@@ -88,9 +124,17 @@ async function showExample(index, animate = true) {
   const requestFinished = await typeText(requestElement, example.request, 24, run);
   if (!requestFinished || run !== animationRun) return;
 
-  await wait(360);
+  cursorElement.classList.add("is-hidden");
   resultLine.classList.add("is-visible");
+  translationElement.classList.add("is-loading");
+  startSpinner();
+
+  await wait(1200);
+  if (run !== animationRun) return;
+  stopSpinner();
+  translationElement.classList.remove("is-loading");
   await typeText(resultElement, example.result, 17, run);
+  resetAutoRotate();
 }
 
 anotherButton?.addEventListener("click", () => {
@@ -110,7 +154,11 @@ copyButton?.addEventListener("click", async () => {
   }
 });
 
-window.requestAnimationFrame(() => showExample(0));
+window.requestAnimationFrame(() => {
+  exampleIndex = Math.floor(Math.random() * examples.length);
+  showExample(exampleIndex);
+  resetAutoRotate();
+});
 
 // --- Live usage stats -------------------------------------------------
 
@@ -199,8 +247,6 @@ async function loadStats() {
   }
 
   statsSection.hidden = false;
-  const navLink = document.querySelector("#nav-stats");
-  if (navLink) navLink.hidden = false;
 }
 
 if (statsSection) {

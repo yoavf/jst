@@ -38,9 +38,9 @@
 
     <header class="site-header wrap">
       <nav aria-label="Main navigation">
-        <a class="scribble-link" href="https://github.com/yoavf/jst">GitHub</a>
         <a href="#notes">Notes</a>
-        <a href="#stats" id="nav-stats" hidden>Stats</a>
+        <a href="#stats">Stats</a>
+        <a class="scribble-link" href="https://github.com/yoavf/jst">GitHub</a>
       </nav>
     </header>
 
@@ -63,11 +63,11 @@
             <span class="terminal-prompt">$</span>
             <code id="request">jst find all files bigger than 500 mb in ~/downloads</code>
             <span class="terminal-cursor"></span>
-            <span class="terminal-spinner" aria-hidden="true"></span>
           </div>
 
           <div class="terminal-line terminal-line--result is-visible" aria-hidden="true">
             <span class="terminal-output">→</span>
+            <span class="terminal-spinner" aria-hidden="true"></span>
             <code id="result">find ~/downloads -type f -size +500M</code>
           </div>
 
@@ -136,7 +136,7 @@
               <span>03</span>
               <div>
                 <h3>Ask for what you need.</h3>
-                <code>jst find files I changed today</code>
+                <code>jst interactive git rebase 4 commits back</code>
               </div>
             </li>
           </ol>
@@ -156,7 +156,7 @@
             <p class="option-label">Hosted</p>
             <h3>Small model,<br />small bill.</h3>
             <p>JST queries run on a small, fast model, so they’re cheap to run. The budget should be enough for around 200,000 queries each month. A few rate limits prevent abuse—not normal use.</p>
-            <p class="usage-note" aria-hidden="true">please don’t ruin it for everyone <span class="hand-heart">♡</span></p>
+            <p class="usage-note" aria-hidden="true">please don’t ruin it for everyone <span class="hand-heart"><svg viewBox="0 0 32 29" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5c-3 0-5.5 2.5-5.5 5.5 0 6 10 14 10 14s10-8 10-14c0-3-2.5-5.5-5.5-5.5-2 0-4 1.5-4.5 3-.5-1.5-2.5-3-4.5-3z" transform="translate(1,1) rotate(-5,16,14)"/></svg></span></p>
           </div>
 
           <span class="or-mark" aria-hidden="true">or</span>
@@ -213,8 +213,8 @@
     </main>
 
     <footer class="site-footer wrap">
-      <p><a href="https://github.com/yoavf">@yoavf</a> did this.</p>
-      <p><a href="https://github.com/yoavf/jst/blob/main/LICENSE">Open source</a>, end to end.</p>
+      <p><a href="https://x.com/yoavf">@yoavf</a> did this</p>
+      <p><a href="https://github.com/yoavf/jst/blob/main/LICENSE">MIT</a> licensed. <a href="https://github.com/yoavf" aria-label="GitHub"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a> <a href="https://linkedin.com/in/yoavf" aria-label="LinkedIn"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 1.146v13.708c0 .633-.526 1.146-1.175 1.146H1.175C.526 16 0 15.487 0 14.854V1.146zm4.943 12.248V6.169H2.542v7.225h2.401zm-1.2-8.212c.837 0 1.358-.554 1.358-1.248-.015-.709-.52-1.248-1.342-1.248-.822 0-1.359.54-1.359 1.248 0 .694.521 1.248 1.327 1.248h.016zm4.908 8.212V9.359c0-.216.016-.432.08-.586.173-.431.568-.878 1.232-.878.869 0 1.216.662 1.216 1.634v3.865h2.401V9.25c0-2.22-1.184-3.252-2.764-3.252-1.274 0-1.845.7-2.165 1.193v.025h-.016a5.54 5.54 0 0 1 .016-.025V6.169h-2.4c.03.678 0 7.225 0 7.225h2.4z"/></svg></a></p>
     </footer>
   </body>
 </html>
