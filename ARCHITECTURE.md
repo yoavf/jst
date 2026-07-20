@@ -35,13 +35,16 @@ CI passes.
 
 The CLI creates a random installation ID and stores it in its config directory.
 The proxy hashes that value in memory and allows 1,000 requests per rolling
-30-day window. Older clients fall back to the Fly-provided source address.
-Tracked fingerprints are bounded to prevent unbounded memory growth.
+30-day window. A separate limiter allows 20 requests per minute per
+Fly-provided client IP. Older clients fall back to that address for the monthly
+limit as well. Tracked fingerprints are bounded to prevent unbounded memory
+growth.
 
 This is intentionally a soft, instance-local limit. It resets after a process
 restart or deployment and can be bypassed by deleting the installation ID.
 Durable enforcement would require a shared TTL store; strict per-person
-enforcement requires identity, payment, or platform attestation.
+enforcement requires identity, payment, or platform attestation. The IP limiter
+depends on a trusted reverse proxy overwriting `Fly-Client-IP`.
 
 ## Workspace
 

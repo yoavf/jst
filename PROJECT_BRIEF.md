@@ -34,8 +34,9 @@ models without shipping a new CLI. Candidate models are benchmarked on latency,
 command generation, and effect-classification accuracy with
 `crates/server/examples/benchmark_models.rs`.
 The hosted proxy applies a best-effort 1,000-request rolling 30-day quota using
-a random anonymous installation ID. The counter is instance-local and does not
-provide billing-grade identity or durable enforcement.
+a random anonymous installation ID, plus a 20-request-per-minute limit using
+Fly's client IP. The counters are instance-local and do not provide
+billing-grade identity or durable enforcement.
 
 ## Distribution
 

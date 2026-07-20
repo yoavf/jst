@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use std::{sync::Arc, time::Duration};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 use tracing::{error, info};
 
@@ -22,6 +22,7 @@ struct AppState {
     llm_model: String,
     translation_slots: Arc<Semaphore>,
     usage_limiter: Option<Arc<rate_limit::RateLimiter>>,
+    minute_limiter: Option<Arc<rate_limit::RateLimiter>>,
 }
 
 #[tokio::main]
@@ -50,6 +51,10 @@ async fn main() {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(1_000);
+    let requests_per_minute = std::env::var("REQUESTS_PER_MINUTE")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(20);
     let max_tracked_installations = std::env::var("MAX_TRACKED_INSTALLATIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -72,6 +77,13 @@ async fn main() {
                 monthly_request_limit,
                 max_tracked_installations,
                 Duration::from_secs(30 * 24 * 60 * 60),
+            ))
+        }),
+        minute_limiter: (requests_per_minute > 0).then(|| {
+            Arc::new(rate_limit::RateLimiter::new(
+                requests_per_minute,
+                max_tracked_installations,
+                Duration::from_secs(60),
             ))
         }),
     };
@@ -114,6 +126,56 @@ async fn translate(
             .into_response();
     }
 
+    let minute_usage = if let Some(limiter) = &state.minute_limiter {
+        let fingerprint = match request_address_fingerprint(&headers)
+            .and_then(|value| value.map_or_else(|| request_fingerprint(&headers), Ok))
+        {
+            Ok(fingerprint) => fingerprint,
+            Err(message) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: message.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        };
+
+        match limiter.check(&fingerprint) {
+            rate_limit::Decision::Allowed { limit, remaining } => Some((limit, remaining)),
+            rate_limit::Decision::Exhausted { limit } => {
+                let mut response = with_usage_headers(
+                    (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        Json(ErrorResponse {
+                            error: "per-minute translation limit reached; try again shortly"
+                                .to_string(),
+                        }),
+                    )
+                        .into_response(),
+                    None,
+                    Some((limit, 0)),
+                );
+                response
+                    .headers_mut()
+                    .insert("retry-after", HeaderValue::from_static("60"));
+                return response;
+            }
+            rate_limit::Decision::Capacity => {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(ErrorResponse {
+                        error: "translation service is busy; try again shortly".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
+
     let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -151,6 +213,7 @@ async fn translate(
                     )
                         .into_response(),
                     Some((limit, 0)),
+                    minute_usage,
                 );
             }
             rate_limit::Decision::Capacity => {
@@ -188,7 +251,18 @@ async fn translate(
                 .into_response()
         }
     };
-    with_usage_headers(response, usage)
+    with_usage_headers(response, usage, minute_usage)
+}
+
+fn request_address_fingerprint(headers: &HeaderMap) -> Result<Option<String>, &'static str> {
+    let Some(value) = headers.get("fly-client-ip") else {
+        return Ok(None);
+    };
+    let value = value.to_str().map_err(|_| "invalid client address")?;
+    let address = value
+        .parse::<IpAddr>()
+        .map_err(|_| "invalid client address")?;
+    Ok(Some(format!("address:{address}")))
 }
 
 fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
@@ -200,11 +274,8 @@ fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
         return Err("invalid JST installation ID");
     }
 
-    if let Some(value) = headers.get("fly-client-ip") {
-        let value = value.to_str().map_err(|_| "invalid client address")?;
-        if !value.is_empty() && value.len() <= 64 && value.is_ascii() {
-            return Ok(format!("address:{value}"));
-        }
+    if let Some(fingerprint) = request_address_fingerprint(headers)? {
+        return Ok(fingerprint);
     }
 
     Err("missing JST installation ID")
@@ -221,14 +292,28 @@ fn is_installation_id(value: &str) -> bool {
         })
 }
 
-fn with_usage_headers(mut response: Response, usage: Option<(u32, u32)>) -> Response {
-    if let Some((limit, remaining)) = usage {
+fn with_usage_headers(
+    mut response: Response,
+    monthly_usage: Option<(u32, u32)>,
+    minute_usage: Option<(u32, u32)>,
+) -> Response {
+    if let Some((limit, remaining)) = monthly_usage {
         response.headers_mut().insert(
             "x-ratelimit-limit",
             HeaderValue::from_str(&limit.to_string()).expect("valid rate limit header"),
         );
         response.headers_mut().insert(
             "x-ratelimit-remaining",
+            HeaderValue::from_str(&remaining.to_string()).expect("valid rate limit header"),
+        );
+    }
+    if let Some((limit, remaining)) = minute_usage {
+        response.headers_mut().insert(
+            "x-ratelimit-minute-limit",
+            HeaderValue::from_str(&limit.to_string()).expect("valid rate limit header"),
+        );
+        response.headers_mut().insert(
+            "x-ratelimit-minute-remaining",
             HeaderValue::from_str(&remaining.to_string()).expect("valid rate limit header"),
         );
     }
