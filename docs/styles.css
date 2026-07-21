@@ -808,7 +808,7 @@ h3 {
 }
 
 .usage-note {
-  margin-top: 2rem;
+  margin-top: 1rem;
   color: var(--blue);
   font-family: "Kalam", cursive;
   transform: rotate(-2deg);
