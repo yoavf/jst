@@ -65,8 +65,8 @@ The hosted server currently applies these safeguards:
 - 100 translations per client IP and 5,000 globally per fixed 24-hour window.
 - A 32-request concurrency cap, 512-byte prompts, 2 KiB request bodies,
   256-token model outputs, and provider timeouts.
-- Strict OS and shell metadata validation, with provider errors hidden from
-  clients.
+- Strict OS and shell metadata validation, with provider details hidden from
+  clients and provider outages identified separately from JST server errors.
 - Rate-limit response headers for each active quota.
 
 The CLI creates a random installation ID in its config directory and sends it
@@ -82,6 +82,7 @@ OpenAI-compatible chat-completions API. For example, using OpenRouter:
 LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
 LLM_API_KEY=... \
 LLM_MODEL=ibm-granite/granite-4.1-8b \
+LLM_FALLBACK_MODEL=google/gemini-2.5-flash-lite \
 cargo run --release -p jst-server
 ```
 
@@ -101,6 +102,7 @@ daily limits. Each accepts `0` to disable it. The bundled implementation trusts
 Fly's `Fly-Client-IP` header; self-hosters should only enable IP limits behind a
 proxy that overwrites that header rather than accepting it from clients.
 `LLM_API_KEY` is optional for local APIs that do not require authentication.
+`LLM_FALLBACK_MODEL` optionally selects a model to try when `LLM_MODEL` fails.
 Alternatively, `JST_API_URL` can point directly to any service implementing
 JST's `/translate` JSON contract.
 

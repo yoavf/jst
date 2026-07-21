@@ -38,6 +38,7 @@ struct Cli {
 enum JstError {
     Network,
     Server(u16),
+    LlmProvider,
     Deserialization,
     Other(String),
 }
@@ -53,6 +54,7 @@ impl fmt::Display for JstError {
                 f,
                 "rate limit reached — slow down, or run your own jst server"
             ),
+            JstError::LlmProvider => write!(f, "trouble reaching the LLM; try again in a moment"),
             JstError::Server(code) => write!(
                 f,
                 "the jst server is having trouble (HTTP {code}); try again in a moment"
@@ -174,6 +176,9 @@ async fn translate(input: &str) -> Result<TranslateResponse, JstError> {
     let status = response.status();
     let body = read_limited_body(response, MAX_RESPONSE_BYTES).await?;
 
+    if status == reqwest::StatusCode::BAD_GATEWAY {
+        return Err(JstError::LlmProvider);
+    }
     if !status.is_success() {
         return Err(JstError::Server(status.as_u16()));
     }
@@ -507,8 +512,8 @@ mod tests {
             "rate limit reached — slow down, or run your own jst server"
         );
         assert_eq!(
-            JstError::Server(502).to_string(),
-            "the jst server is having trouble (HTTP 502); try again in a moment"
+            JstError::LlmProvider.to_string(),
+            "trouble reaching the LLM; try again in a moment"
         );
         assert_eq!(
             JstError::Deserialization.to_string(),
@@ -519,12 +524,12 @@ mod tests {
     #[test]
     fn wraps_error_messages_with_jst_prefix() {
         assert_eq!(
-            format_error(&JstError::Server(502), false),
-            "jst: the jst server is having trouble (HTTP 502); try again in a moment"
+            format_error(&JstError::LlmProvider, false),
+            "jst: trouble reaching the LLM; try again in a moment"
         );
         assert_eq!(
-            format_error(&JstError::Server(502), true),
-            "\x1b[1;31mjst: the jst server is having trouble (HTTP 502); try again in a moment\x1b[0m"
+            format_error(&JstError::LlmProvider, true),
+            "\x1b[1;31mjst: trouble reaching the LLM; try again in a moment\x1b[0m"
         );
     }
 }

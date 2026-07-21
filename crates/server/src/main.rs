@@ -26,6 +26,7 @@ struct AppState {
     llm_api_url: String,
     llm_api_key: String,
     llm_model: String,
+    llm_fallback_model: Option<String>,
     translation_slots: Arc<Semaphore>,
     usage_limiter: Option<Arc<rate_limit::RateLimiter>>,
     minute_limiter: Option<Arc<rate_limit::RateLimiter>>,
@@ -64,6 +65,9 @@ async fn main() {
     let llm_model = std::env::var("LLM_MODEL")
         .or_else(|_| std::env::var("OPENROUTER_MODEL"))
         .expect("LLM_MODEL environment variable must be set");
+    let llm_fallback_model = std::env::var("LLM_FALLBACK_MODEL")
+        .ok()
+        .filter(|model| !model.trim().is_empty());
     let max_concurrent_translations = std::env::var("MAX_CONCURRENT_TRANSLATIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -105,6 +109,7 @@ async fn main() {
         llm_api_url,
         llm_api_key,
         llm_model,
+        llm_fallback_model,
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
         usage_limiter: (monthly_request_limit > 0).then(|| {
             Arc::new(rate_limit::RateLimiter::new(
@@ -289,6 +294,7 @@ async fn translate(
         &state.llm_api_url,
         &state.llm_api_key,
         &state.llm_model,
+        state.llm_fallback_model.as_deref(),
         &req,
     )
     .await
@@ -304,7 +310,7 @@ async fn translate(
             (
                 StatusCode::BAD_GATEWAY,
                 Json(ErrorResponse {
-                    error: "translation provider failed".to_string(),
+                    error: "trouble reaching the LLM; try again in a moment".to_string(),
                 }),
             )
                 .into_response()
