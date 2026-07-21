@@ -5,19 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="JST turns plain-English requests into shell commands and runs them."
+      content="JST turns plain-English requests into shell commands, then lets you run, explain, refine, or edit them."
     />
     <meta name="theme-color" content="#f3efe6" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://jst.sh/" />
     <meta property="og:title" content="jst — shell commands from plain English" />
-    <meta property="og:description" content="JST turns plain-English requests into shell commands and runs them." />
+    <meta property="og:description" content="Turn plain English into shell commands. Run them, question them, or change them first." />
     <meta property="og:image" content="https://jst.sh/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="jst — shell commands from plain English" />
-    <meta name="twitter:description" content="JST turns plain-English requests into shell commands and runs them." />
+    <meta name="twitter:description" content="Turn plain English into shell commands. Run them, question them, or change them first." />
     <meta name="twitter:image" content="https://jst.sh/og.png" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="icon" type="image/x-icon" href="./favicon.ico" />
@@ -30,8 +30,8 @@
       href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Gabarito:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@300;400;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=2" />
-    <script src="./script.js?v=2" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=3" />
+    <script src="./script.js?v=3" defer></script>
     <script src="https://cdn.counter.dev/script.js" data-id="4fbcc31f-5f37-40c3-8788-8fb56c79209b" data-utcoffset="3"></script>
   </head>
   <body>
@@ -53,7 +53,7 @@
             <span class="headline-word">do</span>
             <span class="headline-word">this.<span class="burst" aria-hidden="true"></span></span>
           </h1>
-          <p><strong>Just type what you want done.</strong> <code class="inline-jst">jst</code> turns it into a shell command and runs it.</p>
+          <p><strong>Just type what you want done.</strong> <code class="inline-jst">jst</code> turns it into a shell command and runs it. Use <code class="inline-jst">-i</code> to review it first.</p>
         </div>
 
         <div
@@ -138,27 +138,59 @@
               <span>03</span>
               <div>
                 <h3>Ask for what you need.</h3>
-                <code>jst interactive git rebase 4 commits back</code>
+                <code>jst -i squash my last 4 git commits</code>
               </div>
             </li>
           </ol>
 
-          <p class="quick-start-safety">JST runs the command, or pauses for approval when something looks destructive. Feeling brave? <code>--yolo</code> it.</p>
+        </div>
+      </section>
+
+      <section class="modes" id="modes" aria-labelledby="modes-title">
+        <div class="wrap modes-sheet">
+          <div class="modes-heading">
+            <p class="folio">03 / options</p>
+            <h2 id="modes-title">Options.</h2>
+          </div>
+
+          <div class="mode-options">
+            <article class="mode-option">
+              <code class="mode-flag">--dry</code>
+              <h3>Show only.</h3>
+              <p>Prints the generated command without running it.</p>
+              <code class="mode-example">jst --dry find large files</code>
+            </article>
+
+            <article class="mode-option mode-option--interactive">
+              <code class="mode-flag">-i / --interactive</code>
+              <h3>Review first.</h3>
+              <p>Shows a menu to run, cancel, explain, revise, or edit the command.</p>
+              <code class="mode-example">[y]es [n]o [w]hy [a]sk AI [e]dit</code>
+            </article>
+
+            <article class="mode-option">
+              <code class="mode-flag">--yolo</code>
+              <h3>Skip confirmations.</h3>
+              <p>Runs the generated command without safety confirmations.</p>
+              <code class="mode-example">jst --yolo clear docker caches</code>
+            </article>
+          </div>
         </div>
       </section>
 
       <section class="usage" id="free-use" aria-labelledby="usage-title">
         <div class="wrap usage-sheet">
           <div class="usage-heading">
-            <p class="folio">03 / small print, but nice</p>
+            <p class="folio">04 / small print, but nice</p>
             <h2 id="usage-title">Free, within<br />reason.<sup>*</sup></h2>
           </div>
 
           <div class="usage-option usage-option--hosted">
-            <p class="option-label">Hosted</p>
+            <p class="option-label">On me</p>
             <h3>Small model,<br />small bill.</h3>
-            <p>JST queries run on a small, fast model, so they’re cheap to run. The budget should be enough for around 200,000 queries each month. A few rate limits prevent abuse—not normal use.</p>
+            <p>JST queries run on a small, fast model, so they’re cheap to run. My budget should be enough for around 200,000 queries each month.</p>
             <p class="usage-note" aria-hidden="true">please don’t ruin it for everyone <span class="hand-heart"><svg viewBox="0 0 32 29" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5c-3 0-5.5 2.5-5.5 5.5 0 6 10 14 10 14s10-8 10-14c0-3-2.5-5.5-5.5-5.5-2 0-4 1.5-4.5 3-.5-1.5-2.5-3-4.5-3z" transform="translate(1,1) rotate(-5,16,14)"/></svg></span></p>
+            <p>Note: nothing is saved on the server, except aggregate anonymized stats.</p>
           </div>
 
           <span class="or-mark" aria-hidden="true">or</span>
@@ -166,17 +198,16 @@
           <div class="usage-option usage-option--byok">
             <p class="option-label">BYOK</p>
             <h3>Bring your own key.</h3>
-            <p>Run the open-source server with an OpenAI-compatible provider, then point JST at it. Your key, your limits.</p>
+            <p>Run the open-source server with an OpenAI-compatible provider, then point JST at it.</p>
             <code>JST_API_URL=http://localhost:8080/translate</code>
           </div>
-
         </div>
       </section>
 
       <section class="stats" id="stats" aria-labelledby="stats-title" hidden>
         <div class="wrap stats-sheet">
           <div class="stats-heading">
-            <p class="folio">04 / the tally</p>
+            <p class="folio">05 / the tally</p>
             <h2 id="stats-title">The tally.</h2>
           </div>
 
