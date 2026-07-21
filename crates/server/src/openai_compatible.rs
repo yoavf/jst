@@ -5,6 +5,8 @@ use tracing::warn;
 const MAX_LLM_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_EXPLANATION_BYTES: usize = 1024;
+const MAX_EXPLANATION_PARTS: usize = 8;
+const MAX_EXPLANATION_PART_BYTES: usize = 512;
 // Headroom for reasoning-capable models: thinking tokens count against
 // max_tokens on some providers, and a small budget truncates the JSON output.
 const MAX_OUTPUT_TOKENS: u32 = 2048;
@@ -109,7 +111,8 @@ async fn call_llm(
     model: &str,
     req: &TranslateRequest,
 ) -> Result<TranslateResponse, (Box<dyn std::error::Error + Send + Sync>, Option<String>)> {
-    let system_prompt = build_system_prompt(req.os.as_deref(), req.shell.as_deref());
+    let system_prompt = build_system_prompt(req.os.as_deref(), req.shell.as_deref(), req.explain);
+    let user_prompt = user_prompt(req);
 
     let chat_request = ChatRequest {
         model: model.to_string(),
@@ -120,7 +123,7 @@ async fn call_llm(
             },
             Message {
                 role: "user".to_string(),
-                content: req.input.clone(),
+                content: user_prompt,
             },
         ],
         temperature: 0.0,
@@ -173,11 +176,49 @@ async fn call_llm(
                 finish_reason,
             )
         })
-        .and_then(|response| {
+        .and_then(|mut response| {
             validate_translation_response(&response)
                 .map_err(|e| (e.into(), choice.finish_reason.clone()))?;
+            validate_manual_replacement(req, &response)
+                .map_err(|e| (e.into(), choice.finish_reason.clone()))?;
+            let source_context = req.revision.as_ref().map_or_else(
+                || req.input.clone(),
+                |revision| {
+                    format!(
+                        "{} {} {}",
+                        req.input,
+                        revision.instruction,
+                        revision.replacement.as_deref().unwrap_or_default()
+                    )
+                },
+            );
+            sanitize_explanation_parts(&mut response, &source_context, req.explain);
             Ok(response)
         })
+}
+
+fn user_prompt(req: &TranslateRequest) -> String {
+    let Some(revision) = &req.revision else {
+        return req.input.clone();
+    };
+
+    if let Some(replacement) = &revision.replacement {
+        serde_json::json!({
+            "task": "review_manual_command",
+            "original_request": req.input,
+            "previous_command": revision.command,
+            "manual_command": replacement,
+        })
+        .to_string()
+    } else {
+        serde_json::json!({
+            "task": "revise_command",
+            "original_request": req.input,
+            "current_command": revision.command,
+            "requested_change": revision.instruction,
+        })
+        .to_string()
+    }
 }
 
 fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'static str> {
@@ -188,6 +229,95 @@ fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'s
         return Err("LLM explanation exceeded size limit");
     }
     Ok(())
+}
+
+fn validate_manual_replacement(
+    request: &TranslateRequest,
+    response: &TranslateResponse,
+) -> Result<(), &'static str> {
+    if request
+        .revision
+        .as_ref()
+        .and_then(|revision| revision.replacement.as_ref())
+        .is_some_and(|replacement| response.command != *replacement)
+    {
+        return Err("model altered the manually entered command");
+    }
+    Ok(())
+}
+
+fn sanitize_explanation_parts(
+    response: &mut TranslateResponse,
+    input: &str,
+    explanation_requested: bool,
+) {
+    if !explanation_requested {
+        response.parts.clear();
+        return;
+    }
+
+    if !normalize_explanation_parts(response, input) {
+        warn!(
+            part_count = response.parts.len(),
+            "model returned unusable explanation parts; using prose fallback"
+        );
+        response.parts.clear();
+    }
+}
+
+fn normalize_explanation_parts(response: &mut TranslateResponse, input: &str) -> bool {
+    if response.parts.is_empty() || response.parts.len() > MAX_EXPLANATION_PARTS {
+        return false;
+    }
+
+    let normalized_input = input.to_lowercase();
+    for part in &mut response.parts {
+        let source = part.source.trim();
+        if part.fragment.trim().is_empty()
+            || part.fragment.len() > MAX_EXPLANATION_PART_BYTES
+            || part.meaning.trim().is_empty()
+            || part.meaning.len() > MAX_EXPLANATION_PART_BYTES
+            || part.source.len() > MAX_EXPLANATION_PART_BYTES
+        {
+            return false;
+        }
+
+        if !source.is_empty() && !normalized_input.contains(&source.to_lowercase()) {
+            part.source.clear();
+        }
+    }
+
+    // Small models commonly omit only the spaces surrounding a pipe. Recover
+    // those exact bytes from the validated command without changing semantics.
+    let command = &response.command;
+    let mut cursor = 0;
+    for part in &mut response.parts {
+        let fragment = part.fragment.trim();
+        let Some(relative_start) = command[cursor..].find(fragment) else {
+            return false;
+        };
+        let start = cursor + relative_start;
+        if !command[cursor..start].chars().all(char::is_whitespace) {
+            return false;
+        }
+        let end = start + fragment.len();
+        part.fragment = command[cursor..end].to_string();
+        cursor = end;
+    }
+
+    if !command[cursor..].chars().all(char::is_whitespace) {
+        return false;
+    }
+    if let Some(last) = response.parts.last_mut() {
+        last.fragment.push_str(&command[cursor..]);
+    }
+
+    response
+        .parts
+        .iter()
+        .map(|part| part.fragment.as_str())
+        .collect::<String>()
+        == response.command
 }
 
 fn strip_code_fence(content: &str) -> &str {
@@ -229,9 +359,14 @@ async fn read_limited_body(
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_code_fence, translate, validate_translation_response};
+    use super::{
+        sanitize_explanation_parts, strip_code_fence, translate, user_prompt,
+        validate_manual_replacement, validate_translation_response,
+    };
     use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
-    use jst_shared::{CommandEffects, TranslateRequest, TranslateResponse};
+    use jst_shared::{
+        CommandEffects, CommandPart, CommandRevision, TranslateRequest, TranslateResponse,
+    };
     use serde_json::{json, Value};
     use std::sync::{Arc, Mutex};
 
@@ -241,7 +376,64 @@ mod tests {
             effects: CommandEffects::default(),
             matches_request: true,
             explanation,
+            parts: Vec::new(),
         }
+    }
+
+    #[test]
+    fn revision_prompts_preserve_original_request_and_current_command() {
+        let request = TranslateRequest {
+            input: "show large files".to_string(),
+            os: None,
+            shell: None,
+            explain: true,
+            revision: Some(CommandRevision {
+                command: "du -ah . | sort -hr".to_string(),
+                instruction: "only show the first ten".to_string(),
+                replacement: None,
+            }),
+        };
+
+        let prompt: serde_json::Value =
+            serde_json::from_str(&user_prompt(&request)).expect("valid revision prompt");
+        assert_eq!(prompt["task"], "revise_command");
+        assert_eq!(prompt["original_request"], "show large files");
+        assert_eq!(prompt["current_command"], "du -ah . | sort -hr");
+        assert_eq!(prompt["requested_change"], "only show the first ten");
+    }
+
+    #[test]
+    fn manual_prompts_keep_the_exact_replacement_separate() {
+        let request = TranslateRequest {
+            input: "show files".to_string(),
+            os: None,
+            shell: None,
+            explain: true,
+            revision: Some(CommandRevision {
+                command: "find .".to_string(),
+                instruction: String::new(),
+                replacement: Some("find . -type f -name '*.rs'".to_string()),
+            }),
+        };
+
+        let prompt: serde_json::Value =
+            serde_json::from_str(&user_prompt(&request)).expect("valid manual prompt");
+        assert_eq!(prompt["task"], "review_manual_command");
+        assert_eq!(prompt["previous_command"], "find .");
+        assert_eq!(prompt["manual_command"], "find . -type f -name '*.rs'");
+        assert!(prompt.get("requested_change").is_none());
+
+        let exact = response(
+            "find . -type f -name '*.rs'".to_string(),
+            "Explains the command.".to_string(),
+        );
+        assert!(validate_manual_replacement(&request, &exact).is_ok());
+
+        let altered = response(
+            "find . -type f -name \"*.rs\"".to_string(),
+            "Explains the command.".to_string(),
+        );
+        assert!(validate_manual_replacement(&request, &altered).is_err());
     }
 
     #[test]
@@ -341,6 +533,8 @@ mod tests {
             input: "show the current directory".to_string(),
             os: Some("macos".to_string()),
             shell: Some("zsh".to_string()),
+            explain: false,
+            revision: None,
         };
         let response = translate(
             &reqwest::Client::new(),
@@ -359,5 +553,99 @@ mod tests {
             vec!["granite", "gemini"]
         );
         server.abort();
+    }
+
+    #[test]
+    fn keeps_valid_requested_explanation_parts() {
+        let mut response = response(
+            "du -ah . | sort -hr | head -n 10".to_string(),
+            "Shows the ten largest entries.".to_string(),
+        );
+        response.parts = vec![
+            CommandPart {
+                fragment: "du -ah .".to_string(),
+                meaning: "measure every entry".to_string(),
+                source: "files in this folder".to_string(),
+            },
+            CommandPart {
+                fragment: " | sort -hr".to_string(),
+                meaning: "order sizes largest first".to_string(),
+                source: "largest".to_string(),
+            },
+            CommandPart {
+                fragment: " | head -n 10".to_string(),
+                meaning: "keep the first ten results".to_string(),
+                source: "show the 10".to_string(),
+            },
+        ];
+
+        sanitize_explanation_parts(
+            &mut response,
+            "show the 10 largest files in this folder",
+            true,
+        );
+        assert_eq!(response.parts.len(), 3);
+    }
+
+    #[test]
+    fn repairs_spacing_and_discards_only_unsupported_source_citations() {
+        let mut response = response(
+            "du -ah . | sort -hr | head -n 10".to_string(),
+            "Detailed fallback.".to_string(),
+        );
+        response.parts = vec![
+            CommandPart {
+                fragment: "du -ah .".to_string(),
+                meaning: "measure every entry".to_string(),
+                source: "files in this folder".to_string(),
+            },
+            CommandPart {
+                fragment: "| sort -hr".to_string(),
+                meaning: "order sizes largest first".to_string(),
+                source: "ten biggest".to_string(),
+            },
+            CommandPart {
+                fragment: "| head -n 10".to_string(),
+                meaning: "keep the first ten results".to_string(),
+                source: "show the 10".to_string(),
+            },
+        ];
+
+        sanitize_explanation_parts(
+            &mut response,
+            "show the 10 largest files in this folder",
+            true,
+        );
+
+        assert_eq!(response.parts.len(), 3);
+        assert_eq!(response.parts[1].fragment, " | sort -hr");
+        assert!(response.parts[1].source.is_empty());
+        assert_eq!(
+            response
+                .parts
+                .iter()
+                .map(|part| part.fragment.as_str())
+                .collect::<String>(),
+            response.command
+        );
+    }
+
+    #[test]
+    fn drops_unrequested_or_malformed_explanation_parts() {
+        let part = CommandPart {
+            fragment: "pw".to_string(),
+            meaning: "print the working directory".to_string(),
+            source: "current directory".to_string(),
+        };
+
+        let mut unrequested = response("pwd".to_string(), String::new());
+        unrequested.parts.push(part.clone());
+        sanitize_explanation_parts(&mut unrequested, "show current directory", false);
+        assert!(unrequested.parts.is_empty());
+
+        let mut malformed = response("pwd".to_string(), String::new());
+        malformed.parts.push(part);
+        sanitize_explanation_parts(&mut malformed, "show current directory", true);
+        assert!(malformed.parts.is_empty());
     }
 }

@@ -8,8 +8,13 @@ JST turns an unquoted natural-language command into a shell command and runs it:
 jst find all files bigger than 500 mb in ~/downloads
 ```
 
-There is one interaction mode. JST joins positional arguments into the request,
-translates it through the hosted API, prints the result, and executes it.
+By default, JST joins positional arguments into the request, translates it
+through the hosted API, prints the result, and executes it. `-i` or
+`--interactive` opens a session where the user can approve, abort, explain,
+revise, or manually replace the proposed command. Revisions preserve the
+original request and current command, and return to the same loop with newly
+calculated effects. Exact manual replacements are analyzed but never rewritten
+by the model. `--dry` prints the generated command and exits without execution.
 
 ## Safety
 
@@ -20,8 +25,9 @@ Most low-risk commands run immediately. Confirmation occurs when either:
    installation, elevated privileges, downloaded-code execution, or a mismatch
    between the request and generated command.
 
-The model cannot override the local denylist. `--yolo` explicitly skips both
-confirmation layers.
+The model cannot override the local denylist. Interactive mode requires a
+terminal and explicit approval. `--yolo` skips safety confirmations in the
+normal one-shot mode and cannot be combined with interactive or dry mode.
 
 ## Backend
 
@@ -41,4 +47,5 @@ billing-grade identity or durable enforcement.
 ## Distribution
 
 The Rust CLI is intended for signed prebuilt releases and package managers such
-as Homebrew. It has no local model runtime or interactive terminal UI.
+as Homebrew. It has no local model runtime; interactive mode is a small terminal
+interaction built around the hosted translation API.

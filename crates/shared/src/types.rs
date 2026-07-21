@@ -7,6 +7,10 @@ pub struct TranslateRequest {
     pub os: Option<String>,
     #[serde(default)]
     pub shell: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub explain: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<CommandRevision>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -15,6 +19,28 @@ pub struct TranslateResponse {
     pub effects: CommandEffects,
     pub matches_request: bool,
     pub explanation: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<CommandPart>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandPart {
+    pub fragment: String,
+    pub meaning: String,
+    #[serde(default)]
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandRevision {
+    pub command: String,
+    pub instruction: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement: Option<String>,
 }
 
 impl TranslateResponse {
@@ -67,7 +93,7 @@ pub struct ErrorResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandEffects, TranslateResponse};
+    use super::{CommandEffects, CommandRevision, TranslateRequest, TranslateResponse};
 
     fn response(effects: CommandEffects) -> TranslateResponse {
         TranslateResponse {
@@ -75,6 +101,7 @@ mod tests {
             effects,
             matches_request: true,
             explanation: String::new(),
+            parts: Vec::new(),
         }
     }
 
@@ -150,5 +177,74 @@ mod tests {
             r#"{"command":"pwd","effects":{},"matches_request":true,"explanation":"Prints the directory."}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn old_responses_without_parts_remain_compatible() {
+        let response = serde_json::from_str::<TranslateResponse>(
+            r#"{"command":"pwd","effects":{"reads_data":true,"modifies_data":false,"deletes_data":false,"uses_network":false,"changes_remote_data":false,"changes_processes":false,"installs_software":false,"uses_privilege":false,"executes_remote_code":false},"matches_request":true,"explanation":"Prints the directory."}"#,
+        )
+        .expect("old response remains valid");
+
+        assert!(response.parts.is_empty());
+    }
+
+    #[test]
+    fn optional_explanation_fields_preserve_the_old_wire_shape() {
+        let ordinary_request = TranslateRequest {
+            input: "pwd".to_string(),
+            os: None,
+            shell: None,
+            explain: false,
+            revision: None,
+        };
+        let ordinary_json = serde_json::to_string(&ordinary_request).expect("serializes");
+        assert!(!ordinary_json.contains("\"explain\""));
+        assert!(!ordinary_json.contains("\"revision\""));
+
+        let explained_request = TranslateRequest {
+            explain: true,
+            ..ordinary_request
+        };
+
+        assert!(serde_json::to_string(&explained_request)
+            .expect("serializes")
+            .contains("\"explain\":true"));
+
+        let revision = TranslateRequest {
+            input: "show files".to_string(),
+            os: None,
+            shell: None,
+            explain: true,
+            revision: Some(CommandRevision {
+                command: "find .".to_string(),
+                instruction: "only include Rust files".to_string(),
+                replacement: None,
+            }),
+        };
+        let revision_json = serde_json::to_string(&revision).expect("serializes");
+        assert!(revision_json.contains("\"command\":\"find .\""));
+        assert!(revision_json.contains("\"instruction\":\"only include Rust files\""));
+        assert!(!revision_json.contains("\"replacement\""));
+
+        let manual_revision = TranslateRequest {
+            input: "show files".to_string(),
+            os: None,
+            shell: None,
+            explain: true,
+            revision: Some(CommandRevision {
+                command: "find .".to_string(),
+                instruction: String::new(),
+                replacement: Some("find . -type f".to_string()),
+            }),
+        };
+        assert!(serde_json::to_string(&manual_revision)
+            .expect("serializes")
+            .contains("\"replacement\":\"find . -type f\""));
+
+        let ordinary_response = response(CommandEffects::default());
+        assert!(!serde_json::to_string(&ordinary_response)
+            .expect("serializes")
+            .contains("\"parts\""));
     }
 }

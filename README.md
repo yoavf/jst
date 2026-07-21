@@ -42,12 +42,55 @@ Use `--yolo` to skip all safety confirmations:
 jst --yolo remove all stopped docker containers
 ```
 
-Use `--dry` to require confirmation for every generated command, including
-commands that do not trigger a safety warning:
+Use `--dry` to print a generated command and exit without running it:
 
 ```sh
 jst --dry show the current directory
 ```
+
+Use `-i` or `--interactive` to inspect and refine a command before anything
+runs:
+
+```console
+$ jst -i show me the 10 largest files in this folder
+
+→ du -ah . | sort -hr | head -n 10
+
+Run it?  [y]es  [n]o  [w]hy  [a]sk AI  [e]dit  › w
+
+  du -ah .      measure every entry (“files in this folder”)
+  | sort -hr    order sizes largest first (“largest”)
+  | head -n 10  keep the first ten results (“show me the 10”)
+
+  Effects: reads local data.
+
+Run it?  [y]es  [n]o  [w]hy  [a]sk AI  [e]dit  › a
+
+✦ What should AI change? files only, not directories
+
+→ find . -type f -exec du -h {} + | sort -hr | head -n 10
+
+Run it?  [y]es  [n]o  [w]hy  [a]sk AI  [e]dit  ›
+```
+
+Each change is translated again with the original request and current command
+as context, and its effects are recalculated before the revised command is
+shown. Choose `e` to edit the current command inline, prefilled with the cursor
+at the end. Arrow keys, Home, End, Delete, and Backspace work normally. Enter
+approves the edited command for execution after JST verifies that the model
+analyzed it without alteration. If that analysis discovers a new warning, JST
+shows the warning and asks again instead of running silently.
+
+Pressing Escape while entering an AI change or editing the command discards
+that draft and returns to the action menu. Empty input, `n`, and `q` abort
+safely.
+
+Interactive mode asks the model for detailed explanation metadata up front, so
+choosing `w` does not require another request. `--interactive` and `--dry`
+cannot be combined with `--yolo`.
+
+If a server does not support structured explanations, JST falls back to the
+standalone prose explanation.
 
 ## Server
 
@@ -63,8 +106,8 @@ The hosted server currently applies these safeguards:
 - 1,000 translations per anonymous installation in a fixed 30-day window.
 - 20 translations per minute per client IP at the Fly proxy.
 - 100 translations per client IP and 5,000 globally per fixed 24-hour window.
-- A 32-request concurrency cap, 512-byte prompts, 2 KiB request bodies,
-  256-token model outputs, and provider timeouts.
+- A 32-request concurrency cap, 512-byte prompts and revision instructions,
+  8 KiB request bodies, bounded model outputs, and provider timeouts.
 - Strict OS and shell metadata validation, with provider details hidden from
   clients and provider outages identified separately from JST server errors.
 - Rate-limit response headers for each active quota.
