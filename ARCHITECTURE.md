@@ -4,7 +4,8 @@
 
 JST is a Cargo workspace with three crates:
 
-- `jst-cli` — one-shot command translation, safety checks, and execution.
+- `jst-cli` — command translation, interactive refinement, safety checks, and
+  execution.
 - `jst-server` — a thin proxy for OpenAI-compatible LLM APIs.
 - `jst-shared` — request types, response types, effect policy, and prompting.
 
@@ -14,9 +15,12 @@ JST is a Cargo workspace with three crates:
 jst natural language request
   → POST /translate
   → OpenAI-compatible LLM API
-  → command + concrete effect description
+  → command + concrete effect description + optional semantic parts
   → local denylist OR dangerous model effects
-  → optional confirmation
+  → optional interactive session: explain, revise, manually replace,
+    approve, or abort
+      ↳ revisions return to POST /translate with original request,
+        current command, and requested change
   → user's shell
 ```
 
@@ -24,6 +28,26 @@ The model describes concrete effects rather than assigning an abstract risk
 score. The CLI decides whether those effects require confirmation. A model
 response can add a warning but cannot suppress a warning from the local
 denylist.
+
+Explain requests ask the same model call for a bounded list of command parts.
+Part fragments must concatenate exactly to the executable command, and source
+phrases must occur in the user's request. The server sanitizes this metadata and
+the CLI validates it again before rendering. Invalid explanation metadata is
+discarded and never affects command execution or safety decisions.
+
+Interactive mode requests explanation metadata up front so choosing `w` is
+instantaneous. Choosing `a` sends structured revision context rather than
+concatenating instructions into the original prompt. The model must return a
+complete replacement command and recalculate its effects. The replacement goes
+through the same server validation, local denylist, terminal-safety checks, and
+explicit approval loop as the initial command.
+
+Choosing `e` opens a prefilled inline editor with the cursor at the end. Enter
+counts as execution approval and the edit remains entirely local: it is never
+sent to the server or model. Safe edits run immediately; edits that match the
+local destructive-command denylist return to the approval loop with a warning.
+`--dry` does not enter this loop; it prints the initial translation and exits
+before warnings, confirmation, or execution.
 
 The server crate is the production proxy: it owns provider credentials,
 validates and bounds requests and responses, limits concurrent provider calls,
@@ -63,7 +87,7 @@ successful translations only.
 ## Workspace
 
 ```text
-crates/cli/src/main.rs       argument parsing, API call, confirmation, execution
+crates/cli/src/main.rs       argument parsing, API calls, interactive loop, execution
 crates/cli/src/installation.rs  anonymous installation ID persistence
 crates/cli/src/safety.rs     deterministic destructive-command denylist
 crates/server/src/main.rs    HTTP server and routes

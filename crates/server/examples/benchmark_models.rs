@@ -211,13 +211,19 @@ async fn request_translation(
         input: input.to_string(),
         os: Some("macos".to_string()),
         shell: Some("/bin/zsh".to_string()),
+        explain: false,
+        revision: None,
     };
     let body = ChatRequest {
         model: model.to_string(),
         messages: vec![
             Message {
                 role: "system".to_string(),
-                content: build_system_prompt(request.os.as_deref(), request.shell.as_deref()),
+                content: build_system_prompt(
+                    request.os.as_deref(),
+                    request.shell.as_deref(),
+                    request.explain,
+                ),
             },
             Message {
                 role: "user".to_string(),
