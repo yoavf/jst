@@ -27,6 +27,8 @@ install -m 755 jst-macos-universal/jst ~/.local/bin/jst
 The archive includes both Apple Silicon and Intel support. SHA-256 checksums are
 published beside each release artifact.
 
+## Use
+
 JST prints the generated command and immediately executes it. Commands that
 match the local destructive-command denylist, or whose model-described effects
 indicate deletion, privilege use, process changes, software installation,
@@ -47,6 +49,8 @@ Use `--dry` to print a generated command and exit without running it:
 ```sh
 jst --dry show the current directory
 ```
+
+### Review and refine
 
 Use `-i` or `--interactive` to inspect and refine a command before anything
 runs:
