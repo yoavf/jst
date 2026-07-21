@@ -45,6 +45,40 @@ pub async fn translate(
     api_url: &str,
     api_key: &str,
     model: &str,
+    fallback_model: Option<&str>,
+    req: &TranslateRequest,
+) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
+    let primary_error = match translate_with_model(client, api_url, api_key, model, req).await {
+        Ok(response) => return Ok(response),
+        Err(error) => error,
+    };
+
+    let Some(fallback_model) = fallback_model.filter(|fallback| *fallback != model) else {
+        return Err(primary_error);
+    };
+
+    warn!(
+        primary_model = model,
+        fallback_model,
+        error = %primary_error,
+        "primary LLM failed, trying fallback"
+    );
+
+    translate_with_model(client, api_url, api_key, fallback_model, req)
+        .await
+        .map_err(|fallback_error| {
+            format!(
+                "primary LLM ({model}) failed: {primary_error}; fallback LLM ({fallback_model}) failed: {fallback_error}"
+            )
+            .into()
+        })
+}
+
+async fn translate_with_model(
+    client: &reqwest::Client,
+    api_url: &str,
+    api_key: &str,
+    model: &str,
     req: &TranslateRequest,
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
     let max_retries = 1;
@@ -195,8 +229,11 @@ async fn read_limited_body(
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_code_fence, validate_translation_response};
-    use jst_shared::{CommandEffects, TranslateResponse};
+    use super::{strip_code_fence, translate, validate_translation_response};
+    use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+    use jst_shared::{CommandEffects, TranslateRequest, TranslateResponse};
+    use serde_json::{json, Value};
+    use std::sync::{Arc, Mutex};
 
     fn response(command: String, explanation: String) -> TranslateResponse {
         TranslateResponse {
@@ -239,5 +276,88 @@ mod tests {
         assert!(
             validate_translation_response(&response("pwd".to_string(), "x".repeat(1025))).is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_the_configured_model_when_the_primary_is_unavailable() {
+        async fn mock_completion(
+            State(seen_models): State<Arc<Mutex<Vec<String>>>>,
+            Json(request): Json<Value>,
+        ) -> (StatusCode, Json<Value>) {
+            let model = request["model"]
+                .as_str()
+                .expect("request model")
+                .to_string();
+            seen_models.lock().expect("model log").push(model.clone());
+
+            if model == "granite" {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(json!({ "error": "model unavailable" })),
+                );
+            }
+
+            let content = json!({
+                "command": "pwd",
+                "effects": {
+                    "reads_data": true,
+                    "modifies_data": false,
+                    "deletes_data": false,
+                    "uses_network": false,
+                    "changes_remote_data": false,
+                    "changes_processes": false,
+                    "installs_software": false,
+                    "uses_privilege": false,
+                    "executes_remote_code": false
+                },
+                "matches_request": true,
+                "explanation": "Shows the current directory."
+            })
+            .to_string();
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "choices": [{
+                        "message": { "role": "assistant", "content": content },
+                        "finish_reason": "stop"
+                    }]
+                })),
+            )
+        }
+
+        let seen_models = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/chat/completions", post(mock_completion))
+            .with_state(seen_models.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock LLM");
+        let address = listener.local_addr().expect("mock LLM address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock LLM");
+        });
+
+        let request = TranslateRequest {
+            input: "show the current directory".to_string(),
+            os: Some("macos".to_string()),
+            shell: Some("zsh".to_string()),
+        };
+        let response = translate(
+            &reqwest::Client::new(),
+            &format!("http://{address}/chat/completions"),
+            "",
+            "granite",
+            Some("gemini"),
+            &request,
+        )
+        .await
+        .expect("fallback translation");
+
+        assert_eq!(response.command, "pwd");
+        assert_eq!(
+            *seen_models.lock().expect("model log"),
+            vec!["granite", "gemini"]
+        );
+        server.abort();
     }
 }
