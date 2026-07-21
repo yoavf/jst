@@ -43,12 +43,11 @@ through the same server validation, local denylist, terminal-safety checks, and
 explicit approval loop as the initial command.
 
 Choosing `e` opens a prefilled inline editor with the cursor at the end. Enter
-submits that exact command for effect classification and explanation and also
-counts as execution approval. The server rejects the response if the model
-changes the command. Safe edits run after analysis; edits with newly discovered
-warnings return to the approval loop. `--dry` does not enter this loop; it
-prints the initial translation and exits before warnings, confirmation, or
-execution.
+counts as execution approval and the edit remains entirely local: it is never
+sent to the server or model. Safe edits run immediately; edits that match the
+local destructive-command denylist return to the approval loop with a warning.
+`--dry` does not enter this loop; it prints the initial translation and exits
+before warnings, confirmation, or execution.
 
 The server crate is the production proxy: it owns provider credentials,
 validates and bounds requests and responses, limits concurrent provider calls,

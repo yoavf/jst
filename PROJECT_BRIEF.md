@@ -13,8 +13,8 @@ through the hosted API, prints the result, and executes it. `-i` or
 `--interactive` opens a session where the user can approve, abort, explain,
 revise, or manually replace the proposed command. Revisions preserve the
 original request and current command, and return to the same loop with newly
-calculated effects. Exact manual replacements are analyzed but never rewritten
-by the model. `--dry` prints the generated command and exits without execution.
+calculated effects. Manual replacements stay local and never call the model.
+`--dry` prints the generated command and exits without execution.
 
 ## Safety
 

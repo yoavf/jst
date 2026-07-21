@@ -504,17 +504,7 @@ fn validate_request(request: &TranslateRequest) -> Result<(), &'static str> {
         {
             return Err("revision command must contain 1–2048 safe bytes");
         }
-        if let Some(replacement) = &revision.replacement {
-            if !revision.instruction.is_empty() {
-                return Err("manual revisions cannot also contain an instruction");
-            }
-            if replacement.trim().is_empty()
-                || replacement.len() > MAX_REVISION_COMMAND_BYTES
-                || replacement.chars().any(is_unsafe_terminal_character)
-            {
-                return Err("manual command must contain 1–2048 safe bytes");
-            }
-        } else if revision.instruction.trim().is_empty()
+        if revision.instruction.trim().is_empty()
             || revision.instruction.len() > MAX_REVISION_INSTRUCTION_BYTES
             || revision.instruction.chars().any(char::is_control)
         {
@@ -616,7 +606,6 @@ mod tests {
         revised.revision = Some(jst_shared::CommandRevision {
             command: "find .".to_string(),
             instruction: "only Rust files".to_string(),
-            replacement: None,
         });
         assert!(validate_request(&revised).is_ok());
 
@@ -625,13 +614,6 @@ mod tests {
 
         revised.revision.as_mut().unwrap().command = "find .".to_string();
         revised.revision.as_mut().unwrap().instruction = "x".repeat(513);
-        assert!(validate_request(&revised).is_err());
-
-        revised.revision.as_mut().unwrap().instruction.clear();
-        revised.revision.as_mut().unwrap().replacement = Some("find . -type f".to_string());
-        assert!(validate_request(&revised).is_ok());
-
-        revised.revision.as_mut().unwrap().instruction = "also change it".to_string();
         assert!(validate_request(&revised).is_err());
     }
 

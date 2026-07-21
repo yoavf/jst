@@ -19,8 +19,6 @@ Rules:
 - A revision request contains an original_request, current_command, and requested_change.
 - For revisions, preserve the original request and everything already implemented by current_command except what requested_change explicitly alters.
 - Return a complete replacement command for every revision and recalculate every effect from that replacement.
-- A manual review request contains a manual_command. Return manual_command exactly, byte for byte, as command; do not correct, normalize, quote, or otherwise alter it.
-- For manual review, classify the exact command's effects, judge whether it matches original_request, and explain it normally.
 "##,
     );
 

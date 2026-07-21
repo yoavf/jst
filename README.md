@@ -77,8 +77,8 @@ Each change is translated again with the original request and current command
 as context, and its effects are recalculated before the revised command is
 shown. Choose `e` to edit the current command inline, prefilled with the cursor
 at the end. Arrow keys, Home, End, Delete, and Backspace work normally. Enter
-approves the edited command for execution after JST verifies that the model
-analyzed it without alteration. If that analysis discovers a new warning, JST
+approves the edited command for execution. Manual edits stay entirely local and
+never call AI. If an edit matches JST's local destructive-command denylist, JST
 shows the warning and asks again instead of running silently.
 
 Pressing Escape while entering an AI change or editing the command discards

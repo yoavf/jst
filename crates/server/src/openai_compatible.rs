@@ -179,18 +179,9 @@ async fn call_llm(
         .and_then(|mut response| {
             validate_translation_response(&response)
                 .map_err(|e| (e.into(), choice.finish_reason.clone()))?;
-            validate_manual_replacement(req, &response)
-                .map_err(|e| (e.into(), choice.finish_reason.clone()))?;
             let source_context = req.revision.as_ref().map_or_else(
                 || req.input.clone(),
-                |revision| {
-                    format!(
-                        "{} {} {}",
-                        req.input,
-                        revision.instruction,
-                        revision.replacement.as_deref().unwrap_or_default()
-                    )
-                },
+                |revision| format!("{} {}", req.input, revision.instruction),
             );
             sanitize_explanation_parts(&mut response, &source_context, req.explain);
             Ok(response)
@@ -202,23 +193,13 @@ fn user_prompt(req: &TranslateRequest) -> String {
         return req.input.clone();
     };
 
-    if let Some(replacement) = &revision.replacement {
-        serde_json::json!({
-            "task": "review_manual_command",
-            "original_request": req.input,
-            "previous_command": revision.command,
-            "manual_command": replacement,
-        })
-        .to_string()
-    } else {
-        serde_json::json!({
-            "task": "revise_command",
-            "original_request": req.input,
-            "current_command": revision.command,
-            "requested_change": revision.instruction,
-        })
-        .to_string()
-    }
+    serde_json::json!({
+        "task": "revise_command",
+        "original_request": req.input,
+        "current_command": revision.command,
+        "requested_change": revision.instruction,
+    })
+    .to_string()
 }
 
 fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'static str> {
@@ -227,21 +208,6 @@ fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'s
     }
     if response.explanation.len() > MAX_EXPLANATION_BYTES {
         return Err("LLM explanation exceeded size limit");
-    }
-    Ok(())
-}
-
-fn validate_manual_replacement(
-    request: &TranslateRequest,
-    response: &TranslateResponse,
-) -> Result<(), &'static str> {
-    if request
-        .revision
-        .as_ref()
-        .and_then(|revision| revision.replacement.as_ref())
-        .is_some_and(|replacement| response.command != *replacement)
-    {
-        return Err("model altered the manually entered command");
     }
     Ok(())
 }
@@ -361,7 +327,7 @@ async fn read_limited_body(
 mod tests {
     use super::{
         sanitize_explanation_parts, strip_code_fence, translate, user_prompt,
-        validate_manual_replacement, validate_translation_response,
+        validate_translation_response,
     };
     use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
     use jst_shared::{
@@ -390,7 +356,6 @@ mod tests {
             revision: Some(CommandRevision {
                 command: "du -ah . | sort -hr".to_string(),
                 instruction: "only show the first ten".to_string(),
-                replacement: None,
             }),
         };
 
@@ -400,40 +365,6 @@ mod tests {
         assert_eq!(prompt["original_request"], "show large files");
         assert_eq!(prompt["current_command"], "du -ah . | sort -hr");
         assert_eq!(prompt["requested_change"], "only show the first ten");
-    }
-
-    #[test]
-    fn manual_prompts_keep_the_exact_replacement_separate() {
-        let request = TranslateRequest {
-            input: "show files".to_string(),
-            os: None,
-            shell: None,
-            explain: true,
-            revision: Some(CommandRevision {
-                command: "find .".to_string(),
-                instruction: String::new(),
-                replacement: Some("find . -type f -name '*.rs'".to_string()),
-            }),
-        };
-
-        let prompt: serde_json::Value =
-            serde_json::from_str(&user_prompt(&request)).expect("valid manual prompt");
-        assert_eq!(prompt["task"], "review_manual_command");
-        assert_eq!(prompt["previous_command"], "find .");
-        assert_eq!(prompt["manual_command"], "find . -type f -name '*.rs'");
-        assert!(prompt.get("requested_change").is_none());
-
-        let exact = response(
-            "find . -type f -name '*.rs'".to_string(),
-            "Explains the command.".to_string(),
-        );
-        assert!(validate_manual_replacement(&request, &exact).is_ok());
-
-        let altered = response(
-            "find . -type f -name \"*.rs\"".to_string(),
-            "Explains the command.".to_string(),
-        );
-        assert!(validate_manual_replacement(&request, &altered).is_err());
     }
 
     #[test]

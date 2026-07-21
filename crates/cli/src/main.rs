@@ -227,12 +227,23 @@ async fn review_command(
         if explanation_visible {
             eprintln!(
                 "\n{}",
-                format_detailed_explanation(&response, &command, &source_context, width, use_color,)
+                format_proposal_explanation(
+                    &response,
+                    &command,
+                    &source_context,
+                    proposal_kind,
+                    width,
+                    use_color,
+                )
             );
         }
 
         let local_warnings = safety::warnings_for_command(&command);
-        let model_warnings = response.model_warnings();
+        let model_warnings = if matches!(proposal_kind, ProposalKind::Manual) {
+            Vec::new()
+        } else {
+            response.model_warnings()
+        };
         print_warnings(&local_warnings, &model_warnings, width, use_color);
 
         loop {
@@ -252,10 +263,11 @@ async fn review_command(
                     } else {
                         eprintln!(
                             "\n{}",
-                            format_detailed_explanation(
+                            format_proposal_explanation(
                                 &response,
                                 &command,
                                 &source_context,
+                                proposal_kind,
                                 width,
                                 use_color,
                             )
@@ -275,7 +287,6 @@ async fn review_command(
                     let revision = CommandRevision {
                         command,
                         instruction: instruction.clone(),
-                        replacement: None,
                     };
                     response =
                         translate_with_spinner(input, true, Some(revision), use_color).await?;
@@ -296,23 +307,22 @@ async fn review_command(
                     if replacement == command {
                         return execute_command(&command);
                     }
-                    let revision = CommandRevision {
-                        command: command.clone(),
-                        instruction: String::new(),
-                        replacement: Some(replacement.clone()),
-                    };
-                    response =
-                        translate_with_spinner(input, true, Some(revision), use_color).await?;
-                    source_context = format!("{input} {replacement}");
-                    let edited_command = validated_command(&response)?;
-                    let local_warnings = safety::warnings_for_command(&edited_command);
-                    let model_warnings = response.model_warnings();
-                    if local_warnings.is_empty() && model_warnings.is_empty() {
+                    let local_warnings = safety::warnings_for_command(&replacement);
+                    if local_warnings.is_empty() {
                         eprintln!();
-                        print_command(&edited_command, use_color, ProposalKind::Manual)?;
-                        return execute_command(&edited_command);
+                        print_command(&replacement, use_color, ProposalKind::Manual)?;
+                        return execute_command(&replacement);
                     }
+
+                    response = TranslateResponse {
+                        command: replacement,
+                        effects: CommandEffects::default(),
+                        matches_request: true,
+                        explanation: String::new(),
+                        parts: Vec::new(),
+                    };
                     proposal_kind = ProposalKind::Manual;
+                    explanation_visible = false;
                     eprintln!();
                     continue 'proposal;
                 }
@@ -812,6 +822,24 @@ fn format_detailed_explanation(
     sections.join("\n\n")
 }
 
+fn format_proposal_explanation(
+    response: &TranslateResponse,
+    command: &str,
+    input: &str,
+    kind: ProposalKind,
+    width: usize,
+    color: bool,
+) -> String {
+    if matches!(kind, ProposalKind::Manual) {
+        return indent_wrapped(
+            "This command was entered manually. JST did not send it to AI; only local safety checks were applied.",
+            width,
+        );
+    }
+
+    format_detailed_explanation(response, command, input, width, color)
+}
+
 fn explanation_parts_are_valid(parts: &[CommandPart], command: &str) -> bool {
     if parts.is_empty() || parts.len() > 8 {
         return false;
@@ -1043,9 +1071,9 @@ fn format_error(error: &JstError, color: bool) -> String {
 mod tests {
     use super::{
         clean_command, contains_unsafe_terminal_character, format_detailed_explanation,
-        format_edit_prompt, format_error, format_review_prompt, format_warning, indent_wrapped,
-        next_char_end, parse_review_action, previous_char_start, should_confirm, terminal_safe,
-        Cli, JstError, ReviewAction,
+        format_edit_prompt, format_error, format_proposal_explanation, format_review_prompt,
+        format_warning, indent_wrapped, next_char_end, parse_review_action, previous_char_start,
+        should_confirm, terminal_safe, Cli, JstError, ProposalKind, ReviewAction,
     };
     use clap::Parser;
     use jst_shared::{CommandEffects, CommandPart, TranslateResponse};
@@ -1200,6 +1228,30 @@ mod tests {
         assert_eq!(next_char_end(value, 1), Some(3));
         assert_eq!(previous_char_start(value, value.len()), Some(3));
         assert_eq!(previous_char_start(value, 3), Some(1));
+    }
+
+    #[test]
+    fn manual_explanations_make_the_local_boundary_explicit() {
+        let response = TranslateResponse {
+            command: "find .".to_string(),
+            effects: CommandEffects::default(),
+            matches_request: true,
+            explanation: "Model-generated explanation".to_string(),
+            parts: Vec::new(),
+        };
+
+        let explanation = format_proposal_explanation(
+            &response,
+            &response.command,
+            "show files",
+            ProposalKind::Manual,
+            88,
+            false,
+        );
+
+        assert!(explanation.contains("did not send it to AI"));
+        assert!(explanation.contains("only local safety checks"));
+        assert!(!explanation.contains("Model-generated explanation"));
     }
 
     #[test]

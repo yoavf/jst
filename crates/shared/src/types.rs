@@ -39,8 +39,6 @@ pub struct CommandPart {
 pub struct CommandRevision {
     pub command: String,
     pub instruction: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replacement: Option<String>,
 }
 
 impl TranslateResponse {
@@ -219,28 +217,11 @@ mod tests {
             revision: Some(CommandRevision {
                 command: "find .".to_string(),
                 instruction: "only include Rust files".to_string(),
-                replacement: None,
             }),
         };
         let revision_json = serde_json::to_string(&revision).expect("serializes");
         assert!(revision_json.contains("\"command\":\"find .\""));
         assert!(revision_json.contains("\"instruction\":\"only include Rust files\""));
-        assert!(!revision_json.contains("\"replacement\""));
-
-        let manual_revision = TranslateRequest {
-            input: "show files".to_string(),
-            os: None,
-            shell: None,
-            explain: true,
-            revision: Some(CommandRevision {
-                command: "find .".to_string(),
-                instruction: String::new(),
-                replacement: Some("find . -type f".to_string()),
-            }),
-        };
-        assert!(serde_json::to_string(&manual_revision)
-            .expect("serializes")
-            .contains("\"replacement\":\"find . -type f\""));
 
         let ordinary_response = response(CommandEffects::default());
         assert!(!serde_json::to_string(&ordinary_response)
