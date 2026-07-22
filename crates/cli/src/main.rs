@@ -200,7 +200,7 @@ fn clean_command(command: &str) -> String {
         .filter(|(language, _)| {
             matches!(
                 language.trim().to_ascii_lowercase().as_str(),
-                "bash" | "sh" | "shell" | "zsh"
+                "bash" | "bat" | "batch" | "cmd" | "sh" | "shell" | "zsh"
             )
         })
         .map_or(normalized.as_str(), |(_, command)| command);
@@ -209,14 +209,23 @@ fn clean_command(command: &str) -> String {
 
 fn shell_name() -> Option<String> {
     #[cfg(windows)]
-    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
-    #[cfg(not(windows))]
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    {
+        let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+        return Path::new(&shell)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string);
+    }
 
-    Path::new(&shell)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string)
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").ok().and_then(|shell| {
+            Path::new(&shell)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+    }
 }
 
 fn should_confirm(yolo: bool, dry: bool, local_warnings: &[&str], model_warnings: &[&str]) -> bool {
@@ -400,7 +409,17 @@ mod tests {
         assert_eq!(clean_command("```bash\npwd\n```"), "pwd");
         assert_eq!(clean_command("```zsh\npwd\n```"), "pwd");
         assert_eq!(clean_command("```Bash\r\npwd\r\n```"), "pwd");
+        assert_eq!(clean_command("```cmd\r\ndir\r\n```"), "dir");
+        assert_eq!(clean_command("```bat\ndir\n```"), "dir");
         assert_eq!(clean_command("```"), "");
+    }
+
+    #[test]
+    fn leaves_unsupported_shell_fences_rejected_by_terminal_validation() {
+        let command = clean_command("```powershell\nGet-ChildItem\n```");
+
+        assert_eq!(command, "powershell\nGet-ChildItem");
+        assert!(contains_unsafe_terminal_character(&command));
     }
 
     #[test]
