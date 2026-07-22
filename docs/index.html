@@ -5,19 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="JST turns plain-English requests into shell commands, then lets you run, explain, refine, or edit them."
+      content="jst turns plain-English requests into shell commands and runs them."
     />
     <meta name="theme-color" content="#f3efe6" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://jst.sh/" />
     <meta property="og:title" content="jst — shell commands from plain English" />
-    <meta property="og:description" content="Turn plain English into shell commands. Run them, question them, or change them first." />
+    <meta property="og:description" content="jst turns plain-English requests into shell commands and runs them." />
     <meta property="og:image" content="https://jst.sh/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="jst — shell commands from plain English" />
-    <meta name="twitter:description" content="Turn plain English into shell commands. Run them, question them, or change them first." />
+    <meta name="twitter:description" content="jst turns plain-English requests into shell commands and runs them." />
     <meta name="twitter:image" content="https://jst.sh/og.png" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="icon" type="image/x-icon" href="./favicon.ico" />
@@ -53,12 +53,11 @@
             <span class="headline-word">do</span>
             <span class="headline-word">this.<span class="burst" aria-hidden="true"></span></span>
           </h1>
-          <p><strong>Just type what you want done.</strong> <code class="inline-jst">jst</code> turns it into a shell command and runs it. Use <code class="inline-jst">-i</code> to review it first.</p>
+          <p><strong>Just type what you want done.</strong> <code class="inline-jst">jst</code> turns it into a shell command and runs it.</p>
         </div>
-
         <div
           class="translation"
-          aria-label="JST turns the request find all files bigger than 500 megabytes in downloads into the shell command find downloads type file size plus 500 megabytes"
+          aria-label="jst turns the request find all files bigger than 500 megabytes in downloads into the shell command find downloads type file size plus 500 megabytes"
         >
           <svg class="translation-map" width="0" height="0" aria-hidden="true" focusable="false"></svg>
           <div class="terminal-line terminal-line--request" aria-hidden="true">
@@ -101,10 +100,10 @@
           </div>
 
           <div class="motivation">
-            <p class="motivation-lede">With coding agents doing most of the work, I’ve found myself using the shell less. Then, when I do need it, I no longer remember how to do basic things.</p>
+            <p class="motivation-lede">With coding agents doing most of the work, I’ve started forgetting the syntax for commands like <code>find</code> or <code>git</code>.</p>
             <div class="motivation-body">
-              <p>Sure, I can ask an LLM how to find a file, then copy its answer into the terminal. But I kept thinking: why not just ask the terminal?</p>
-              <p>So I made <code>jst</code>. Say what you need after the command; it turns that into shell, shows you what it will run, and runs it. It asks before obvious destructive stuff. <code>--yolo</code> is there for more confident days.</p>
+              <p>Sure, I can ask an LLM how to do it and copy the text to the terminal, but where's the fun in that?</p>
+              <p>So I made <code>jst</code> ("just"). Just type what you need in plain English (or any language actually). Jst will turns that into shell, shows you what it will run, and run it. It will try and ask for permission before destructive commands, but you can use <code>--dry</code> or <code>--interactive</code> to stay safe.</p>
             </div>
             <p class="motivation-note" aria-hidden="true"><span>$</span> jst find files I changed today</p>
           </div>
@@ -183,14 +182,14 @@
           <div class="usage-heading">
             <p class="folio">04 / small print, but nice</p>
             <h2 id="usage-title">Free, within<br />reason.<sup>*</sup></h2>
+            <p class="usage-note" aria-hidden="true">please don’t ruin it for everyone <span class="hand-heart"><svg viewBox="0 0 32 29" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5c-3 0-5.5 2.5-5.5 5.5 0 6 10 14 10 14s10-8 10-14c0-3-2.5-5.5-5.5-5.5-2 0-4 1.5-4.5 3-.5-1.5-2.5-3-4.5-3z" transform="translate(1,1) rotate(-5,16,14)"/></svg></span></p>
           </div>
 
           <div class="usage-option usage-option--hosted">
             <p class="option-label">On me</p>
             <h3>Small model,<br />small bill.</h3>
-            <p>JST queries run on a small, fast model, so they’re cheap to run. My budget should be enough for around 200,000 queries each month.</p>
-            <p class="usage-note" aria-hidden="true">please don’t ruin it for everyone <span class="hand-heart"><svg viewBox="0 0 32 29" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2.5c-3 0-5.5 2.5-5.5 5.5 0 6 10 14 10 14s10-8 10-14c0-3-2.5-5.5-5.5-5.5-2 0-4 1.5-4.5 3-.5-1.5-2.5-3-4.5-3z" transform="translate(1,1) rotate(-5,16,14)"/></svg></span></p>
-            <p>Note: nothing is saved on the server, except aggregate anonymized stats.</p>
+            <p><code>jst</code>  queries run on a small, fast model, so they’re cheap to run. My budget should be enough for around 200,000 queries each month.</p>
+            <p><b>Note:</b> nothing is saved on the server, except aggregate anonymized stats.</p>
           </div>
 
           <span class="or-mark" aria-hidden="true">or</span>
@@ -198,7 +197,7 @@
           <div class="usage-option usage-option--byok">
             <p class="option-label">BYOK</p>
             <h3>Bring your own key.</h3>
-            <p>Run the open-source server with an OpenAI-compatible provider, then point JST at it.</p>
+            <p>Run the open-source server with an OpenAI-compatible provider, then point jst at it.</p>
             <code>JST_API_URL=http://localhost:8080/translate</code>
           </div>
         </div>
@@ -214,7 +213,7 @@
           <div class="stats-total">
             <p class="stats-number" id="stats-total">—</p>
             <p class="stats-caption">queries translated so far</p>
-            <p class="stats-note">Anonymous, aggregate counts from the hosted JST API.</p>
+            <p class="stats-note">Anonymous, aggregate counts from the hosted jst API.</p>
           </div>
 
           <div class="stats-commands">

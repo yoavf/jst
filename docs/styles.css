@@ -791,6 +791,10 @@ h3 {
   gap: clamp(2rem, 4vw, 4rem);
 }
 
+.usage:has(+ .stats:not([hidden])) .usage-sheet {
+  border-bottom: 0;
+}
+
 .usage-heading h2 {
   font-size: clamp(3.8rem, 6vw, 6.3rem);
 }
@@ -808,7 +812,7 @@ h3 {
 }
 
 .usage-note {
-  margin-top: 1rem;
+  margin-top: 0rem;
   color: var(--blue);
   font-family: "Kalam", cursive;
   transform: rotate(-2deg);
