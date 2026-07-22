@@ -286,9 +286,9 @@ function formatNumber(value) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function formatDay(date) {
-  const [, month, day] = date.split("-").map(Number);
-  return `${MONTH_NAMES[month - 1]} ${day}`;
+function formatRangeDay(date) {
+  const [year, month, day] = date.split("-").map(Number);
+  return `${MONTH_NAMES[month - 1]} ${day}, ’${String(year).slice(-2)}`;
 }
 
 function renderCommandBar({ command, count }, index, max) {
@@ -326,7 +326,11 @@ function renderDayBar({ date, count }, index, days, max) {
   bar.className = "day-bar";
   if (index === days.length - 1) bar.classList.add("day-bar--today");
   bar.style.setProperty("--value", `${(count / max) * 100}%`);
-  bar.title = `${formatDay(date)} — ${formatNumber(count)} ${count === 1 ? "query" : "queries"}`;
+  const tooltip = `${formatRangeDay(date)} · ${formatNumber(count)} ${count === 1 ? "query" : "queries"}`;
+  bar.dataset.tooltip = tooltip;
+  bar.setAttribute("role", "listitem");
+  bar.setAttribute("aria-label", tooltip);
+  bar.tabIndex = 0;
   return bar;
 }
 
@@ -344,14 +348,15 @@ async function loadStats() {
     );
   }
 
-  const days = stats.daily || [];
+  const allDays = stats.daily || [];
+  const firstActiveDay = allDays.findIndex((day) => day.count > 0);
+  const daysSinceLaunch = firstActiveDay === -1 ? allDays : allDays.slice(firstActiveDay);
+  const days = daysSinceLaunch.slice(-30);
   if (days.length > 0) {
     const max = Math.max(...days.map((day) => day.count), 1);
     dayBarsElement.replaceChildren(
       ...days.map((day, index) => renderDayBar(day, index, days, max)),
     );
-    document.querySelector("#day-bars-start").textContent = formatDay(days[0].date);
-    document.querySelector("#day-bars-end").textContent = formatDay(days[days.length - 1].date);
   }
 
   statsSection.hidden = false;

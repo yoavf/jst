@@ -92,8 +92,8 @@
         <a class="down-cue" href="#notes" aria-label="Continue to field notes">↓</a>
       </section>
 
-      <section class="field-guide" id="notes" aria-labelledby="notes-title">
-        <div class="wrap field-grid">
+      <section class="field-guide" aria-labelledby="notes-title">
+        <div class="wrap field-grid" id="notes">
           <div class="section-intro">
             <p class="folio">01 / why this exists</p>
             <h2 id="notes-title">My shell skills<br />got rusty.</h2>
@@ -208,12 +208,22 @@
           <div class="stats-heading">
             <p class="folio">05 / the tally</p>
             <h2 id="stats-title">The tally.</h2>
+            <p class="stats-note">Anonymous, aggregate counts from the hosted jst API.</p>
           </div>
 
           <div class="stats-total">
-            <p class="stats-number" id="stats-total">—</p>
-            <p class="stats-caption">queries translated so far</p>
-            <p class="stats-note">Anonymous, aggregate counts from the hosted jst API.</p>
+            <div class="stats-total-heading">
+              <p class="stats-number" id="stats-total">—</p>
+              <p class="stats-caption">queries translated so far</p>
+            </div>
+            <div class="stats-trend">
+              <div
+                class="day-bars"
+                id="day-bars"
+                role="list"
+                aria-label="Bar chart of up to 30 days of daily query counts"
+              ></div>
+            </div>
           </div>
 
           <div class="stats-commands">
@@ -221,18 +231,6 @@
             <ol class="command-bars" id="command-bars"></ol>
           </div>
 
-          <div class="stats-trend">
-            <div
-              class="day-bars"
-              id="day-bars"
-              role="img"
-              aria-label="Bar chart of daily query counts for the last 30 days"
-            ></div>
-            <div class="day-bars-labels" aria-hidden="true">
-              <span id="day-bars-start"></span>
-              <span id="day-bars-end"></span>
-            </div>
-          </div>
         </div>
       </section>
 
