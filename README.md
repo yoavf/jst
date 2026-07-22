@@ -128,8 +128,8 @@ OpenAI-compatible chat-completions API. For example, using OpenRouter:
 ```sh
 LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
 LLM_API_KEY=... \
-LLM_MODEL=ibm-granite/granite-4.1-8b \
-LLM_FALLBACK_MODEL=google/gemini-2.5-flash-lite \
+LLM_MODEL=microsoft/phi-4 \
+LLM_FALLBACK_MODEL=google/gemma-4-26b-a4b-it \
 cargo run --release -p jst-server
 ```
 
@@ -162,3 +162,8 @@ and push to `main`.
 cargo test --workspace
 cargo build --workspace
 ```
+
+The reusable [model benchmark](crates/server/examples/benchmark_models.md)
+compares command generation, effect classification, parse reliability, and
+latency directly against an OpenAI-compatible provider without touching hosted
+JST usage statistics.
