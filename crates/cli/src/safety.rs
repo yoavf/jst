@@ -66,7 +66,7 @@ fn rules() -> &'static [Rule] {
             (r"(?i)\b(fdupes\b[^\n]*\s-d|rsync\b[^\n]*--delete\b|truncate\b|shred\b|srm\b|wipe\b)", "This command can delete or irreversibly overwrite data."),
             (r"(?i)(^|[|;&]\s*)(sudo(\s+--)?\s+)?([^\s]*/)?dd\s", "This command writes raw data and can overwrite disks."),
             (r"(?i)\b(mkfs|newfs|fdisk|parted|wipefs|cryptsetup)\b|\bdiskutil\s+(erase|partition|apfs\s+delete)", "This command can reformat, encrypt, or repartition storage."),
-            (r"(?i)(^|[|;&]\s*)(cmd(\.exe)?\s+/(c|k)\s+)?(format|diskpart)\b|\b(clear-disk|initialize-disk|format-volume|remove-partition)\b", "This Windows command can reformat or repartition storage."),
+            (r"(?i)(^|[|;&]\s*)(cmd(\.exe)?\s+/(c|k)\s+)?(format|diskpart)(?:\s|$)|\b(clear-disk|initialize-disk|format-volume|remove-partition)\b", "This Windows command can reformat or repartition storage."),
             (r"(?i)\b(chmod|chown|chgrp)\b", "This command changes file permissions or ownership."),
             (r"(?i)\b(icacls|cacls|takeown|set-acl)\b", "This Windows command changes file permissions or ownership."),
             (r"(?i)\bgit\b[^\n|;&]*\b(clean\b[^\n]*-[^\s]*[fdx]|reset\s+--hard\b|checkout\s+--\s|restore\b|rebase\b|commit\b[^\n]*--amend\b|stash\s+(drop|clear)\b|reflog\s+expire\b|gc\b[^\n]*--prune|branch\s+-[dD]\b|push\b)", "This Git command can discard work, rewrite history, or change a remote."),
@@ -76,7 +76,9 @@ fn rules() -> &'static [Rule] {
             (r"(?i)\b(systemctl\s+(stop|disable|mask)|launchctl\s+(remove|unload|bootout))\b", "This command stops or disables a system service."),
             (r"(?i)\b(stop-service|remove-service)\b|\b(sc(\.exe)?|net)\s+(stop|delete)\b", "This Windows command stops or deletes a system service."),
             (r"(?i)\bkubectl\b[^\n|;&]*\b(delete|replace)\b|\bterraform\b[^\n|;&]*\bdestroy\b|\baws\b[^\n|;&]*\bdelete\b", "This command can change or delete remote infrastructure."),
-            (r"(?i)\b(brew|apt(-get)?|dnf|yum|pacman|npm|pnpm|yarn|pipx?|gem|cargo)\b[^\n|;&]*\b(ci|install|add|update|upgrade|uninstall|remove|purge|autoremove|clean)\b|\bpython[23]?\s+-m\s+pip\s+install\b", "This command changes installed software or cached packages."),
+            (r"(?i)\b(brew|apt(-get)?|dnf|yum|pacman|npm|pnpm|yarn|pipx?|gem|cargo|winget|choco|scoop)\b[^\n|;&]*\b(ci|install|add|update|upgrade|uninstall|remove|purge|autoremove|clean)\b|\bpython[23]?\s+-m\s+pip\s+install\b|\bmsiexec(\.exe)?\b[^\n|;&]*\s/(x|uninstall)\b", "This command changes installed software or cached packages."),
+            (r"(?i)\breg(\.exe)?\s+(add|delete|import|restore|load|unload|copy)\b", "This Windows command changes the registry."),
+            (r"(?i)\brobocopy(\.exe)?\b[^\n|;&]*\s/mir\b", "This Windows command mirrors directories and may delete destination files."),
             (r"(?i)\b(drop|truncate)\s+(table|database|schema)\b|\bdelete\s+from\b", "This command can delete database data."),
             (r"(?i)\b(curl|wget)\b[^|\n]*\|\s*(sudo\s+)?(sh|bash|zsh)\b", "This command downloads and immediately executes remote code."),
             (r"(?i)\bcurl\b[^\n]*(--request|-X)\s*(POST|PUT|PATCH|DELETE)\b|\bcurl\b[^\n]*(--data[^\s]*|-d|-F|--form|--upload-file|-T)\b", "This command may change remote data."),
@@ -127,6 +129,14 @@ mod tests {
             "Get-ChildItem C:\\temp",
             "Get-Content C:\\temp\\notes.txt",
             "clang-format source.cpp",
+            "Get-Process | Format-Table",
+            "Format-Hex file.bin",
+            "winget list",
+            "choco search ripgrep",
+            "scoop list",
+            r"reg query HKCU\Software",
+            r"robocopy C:\source C:\destination /L",
+            "msiexec /?",
         ] {
             assert_safe(command);
         }
@@ -316,6 +326,25 @@ mod tests {
             "python3 -m pip install requests",
             "DROP TABLE users",
             "sqlite3 app.db 'DELETE FROM users'",
+        ] {
+            assert_warns(command);
+        }
+    }
+
+    #[test]
+    fn catches_windows_software_registry_and_mirror_changes() {
+        for command in [
+            "winget install Git.Git",
+            "winget uninstall 7zip.7zip",
+            "winget upgrade --all",
+            "choco install ripgrep",
+            "choco uninstall ripgrep",
+            "scoop update ripgrep",
+            "msiexec /x product.msi",
+            "msiexec.exe /uninstall product.msi",
+            r"reg add HKCU\Software\Jst /v Enabled /d 1",
+            r"reg.exe delete HKCU\Software\Jst /f",
+            r"robocopy C:\source C:\destination /MIR",
         ] {
             assert_warns(command);
         }
