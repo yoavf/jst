@@ -1,7 +1,7 @@
 mod installation;
 mod safety;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use jst_shared::{
@@ -24,7 +24,8 @@ const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
 #[command(
     name = "jst",
     version,
-    about = "Run shell commands from natural-language requests"
+    about = "Turn plain English into a shell command and run it",
+    after_help = "Examples:\n  jst show the 10 largest files here\n  jst --dry find files larger than 500 MB\n  jst -i remove stopped Docker containers\n\nUse --dry to preview or -i to review before running."
 )]
 struct Cli {
     /// Skip all safety confirmations
@@ -40,7 +41,7 @@ struct Cli {
     dry: bool,
 
     /// What you want to do, in plain English
-    #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+    #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
     prompt: Vec<String>,
 }
 
@@ -89,6 +90,16 @@ async fn main() {
 }
 
 async fn run() -> Result<(), JstError> {
+    if std::env::args_os().len() == 1 {
+        let mut command = Cli::command();
+        let mut stdout = io::stdout().lock();
+        command
+            .write_help(&mut stdout)
+            .map_err(|error| JstError::Other(format!("{error}")))?;
+        writeln!(stdout).map_err(|error| JstError::Other(format!("{error}")))?;
+        return Ok(());
+    }
+
     let cli = Cli::parse();
     let input = cli.prompt.join(" ");
     let use_color = should_use_color();
@@ -1075,7 +1086,7 @@ mod tests {
         format_warning, indent_wrapped, next_char_end, parse_review_action, previous_char_start,
         should_confirm, terminal_safe, Cli, JstError, ProposalKind, ReviewAction,
     };
-    use clap::Parser;
+    use clap::{error::ErrorKind, CommandFactory, Parser};
     use jst_shared::{CommandEffects, CommandPart, TranslateResponse};
 
     #[test]
@@ -1178,8 +1189,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_prompt() {
-        assert!(Cli::try_parse_from(["jst"]).is_err());
+    fn help_includes_onboarding_examples() {
+        let output = Cli::command().render_help().to_string();
+
+        assert!(output.contains("Examples:"));
+        assert!(output.contains("jst show the 10 largest files here"));
+        assert!(output.contains("Use --dry to preview or -i to review before running."));
+    }
+
+    #[test]
+    fn rejects_unknown_option_before_prompt() {
+        let error =
+            Cli::try_parse_from(["jst", "--vesrion"]).expect_err("unknown option should fail");
+
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+        assert!(error.to_string().contains("--help"));
+    }
+
+    #[test]
+    fn accepts_option_like_values_after_prompt_begins() {
+        let cli = Cli::try_parse_from(["jst", "show", "git", "--version"])
+            .expect("trailing prompt values may begin with a hyphen");
+
+        assert_eq!(cli.prompt.join(" "), "show git --version");
     }
 
     #[test]
