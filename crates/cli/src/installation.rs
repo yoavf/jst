@@ -16,6 +16,10 @@ fn config_directory() -> io::Result<PathBuf> {
     if let Some(path) = std::env::var_os("JST_CONFIG_DIR") {
         return Ok(PathBuf::from(path));
     }
+    #[cfg(windows)]
+    if let Some(path) = std::env::var_os("APPDATA") {
+        return Ok(PathBuf::from(path).join("jst"));
+    }
     if let Some(path) = std::env::var_os("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(path).join("jst"));
     }

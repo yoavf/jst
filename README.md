@@ -16,16 +16,23 @@ brew install yoavf/tap/jst
 
 ### Manual
 
-Signed and notarized universal macOS binaries are published with each GitHub
-release. Download the ZIP for the latest release, then install `jst` somewhere
-on your `PATH`, for example:
+Each GitHub release includes builds for:
+
+- macOS (signed and notarized universal binary for Apple Silicon and Intel)
+- Linux x86-64
+- Windows x86-64
+
+Download the archive for your platform and put `jst` (or `jst.exe` on Windows)
+somewhere on your `PATH`. For example, on macOS or Linux:
 
 ```sh
-install -m 755 jst-macos-universal/jst ~/.local/bin/jst
+install -m 755 jst-*/jst ~/.local/bin/jst
 ```
 
-The archive includes both Apple Silicon and Intel support. SHA-256 checksums are
-published beside each release artifact.
+For WSL, use the Linux archive and install it inside your WSL distribution. Use
+the Windows archive when running `jst` from native Command Prompt or PowerShell.
+
+SHA-256 checksums are published beside every release artifact.
 
 ## Use
 

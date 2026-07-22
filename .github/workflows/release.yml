@@ -81,26 +81,125 @@ jobs:
             dist/${{ env.RELEASE_ARCHIVE }}.sha256
           if-no-files-found: error
 
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/jst-cert.p12"
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+
+  linux:
+    name: Linux x86-64 binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Test
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build and package
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            ARCHIVE="jst-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
+          else
+            ARCHIVE="jst-preview-${GITHUB_RUN_NUMBER}-linux-x86_64.tar.gz"
+          fi
+          PACKAGE_DIR="dist/jst-linux-x86_64"
+          cargo build --locked --release --package jst-cli
+          mkdir -p "$PACKAGE_DIR"
+          install -m 755 target/release/jst "$PACKAGE_DIR/jst"
+          cp LICENSE "$PACKAGE_DIR/LICENSE"
+          tar -C dist -czf "dist/$ARCHIVE" "$(basename "$PACKAGE_DIR")"
+          (cd dist && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256")
+          echo "RELEASE_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: jst-linux-x86_64
+          path: |
+            dist/${{ env.RELEASE_ARCHIVE }}
+            dist/${{ env.RELEASE_ARCHIVE }}.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86-64 binary
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Test
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build and package
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like "refs/tags/*") {
+            $archive = "jst-$env:GITHUB_REF_NAME-windows-x86_64.zip"
+          } else {
+            $archive = "jst-preview-$env:GITHUB_RUN_NUMBER-windows-x86_64.zip"
+          }
+          $packageDir = "dist/jst-windows-x86_64"
+          cargo build --locked --release --package jst-cli
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item target/release/jst.exe "$packageDir/jst.exe"
+          Copy-Item LICENSE "$packageDir/LICENSE"
+          Compress-Archive -Path $packageDir -DestinationPath "dist/$archive"
+          $hash = (Get-FileHash "dist/$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -NoNewline "dist/$archive.sha256"
+          "RELEASE_ARCHIVE=$archive" | Add-Content $env:GITHUB_ENV
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: jst-windows-x86_64
+          path: |
+            dist/${{ env.RELEASE_ARCHIVE }}
+            dist/${{ env.RELEASE_ARCHIVE }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            "dist/$RELEASE_ARCHIVE" \
-            "dist/$RELEASE_ARCHIVE.sha256" \
+            dist/*.zip \
+            dist/*.tar.gz \
+            dist/*.sha256 \
             --title "JST $GITHUB_REF_NAME" \
             --generate-notes
 
       - name: Bump Homebrew formula
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           : "${HOMEBREW_TAP_TOKEN:?HOMEBREW_TAP_TOKEN secret is required (fine-grained PAT with contents:write on yoavf/homebrew-tap)}"
 
           VERSION="${GITHUB_REF_NAME#v}"
-          SHA256="$(shasum -a 256 "dist/$RELEASE_ARCHIVE" | awk '{print $1}')"
+          MACOS_ARCHIVE="jst-${GITHUB_REF_NAME}-macos-universal.zip"
+          SHA256="$(sha256sum "dist/$MACOS_ARCHIVE" | awk '{print $1}')"
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/yoavf/homebrew-tap.git" tap
           mkdir -p tap/Formula
@@ -115,11 +214,3 @@ jobs:
           fi
           git -C tap commit -m "jst $VERSION"
           git -C tap push
-
-      - name: Remove temporary signing material
-        if: always()
-        run: |
-          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/jst-cert.p12"
-          if [ -n "${KEYCHAIN_PATH:-}" ]; then
-            security delete-keychain "$KEYCHAIN_PATH" || true
-          fi
