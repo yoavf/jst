@@ -96,6 +96,22 @@ cannot be combined with `--yolo`.
 If a server does not support structured explanations, JST falls back to the
 standalone prose explanation.
 
+### Server status
+
+Use `--status` to check the configured JST server without calling the model:
+
+```console
+$ jst --status
+Server: ok
+Primary model: provider/primary-model
+Fallback model: provider/fallback-model
+Calls today: 123
+Calls all time: 4567
+```
+
+The usage totals are anonymous aggregates and display as unavailable when the
+server's stats store is disabled or temporarily unreachable.
+
 ## Server
 
 By default, the CLI sends translation requests to the hosted JST server. The
@@ -138,6 +154,9 @@ Then point the CLI at it:
 ```sh
 JST_API_URL=http://127.0.0.1:8080/translate jst find large files
 ```
+
+`jst --status` derives the sibling `/status` endpoint from `JST_API_URL`. Set
+`JST_STATUS_URL` when a custom deployment exposes status at a different URL.
 
 The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.

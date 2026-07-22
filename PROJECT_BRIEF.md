@@ -15,6 +15,8 @@ revise, or manually replace the proposed command. Revisions preserve the
 original request and current command, and return to the same loop with newly
 calculated effects. Manual replacements stay local and never call the model.
 `--dry` prints the generated command and exits without execution.
+`--status` checks server health, configured model names, and available
+anonymous usage totals without making a translation request.
 
 ## Safety
 
@@ -43,6 +45,10 @@ The hosted proxy applies a best-effort 1,000-request rolling 30-day quota using
 a random anonymous installation ID, plus a 20-request-per-minute limit using
 Fly's client IP. The counters are instance-local and do not provide
 billing-grade identity or durable enforcement.
+
+The server exposes a lightweight `/status` endpoint. It always reports process
+health and the primary and fallback model configuration, and includes aggregate
+calls today and all-time when the shared stats store responds promptly.
 
 ## Distribution
 
