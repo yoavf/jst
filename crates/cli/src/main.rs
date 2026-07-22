@@ -5,7 +5,8 @@ use clap::{CommandFactory, Parser};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use jst_shared::{
-    CommandEffects, CommandPart, CommandRevision, TranslateRequest, TranslateResponse,
+    CommandEffects, CommandPart, CommandRevision, ServerStatusResponse, TranslateRequest,
+    TranslateResponse,
 };
 use std::fmt;
 use std::io::{self, IsTerminal, Write};
@@ -15,6 +16,7 @@ use std::time::Duration;
 
 const DEFAULT_API_URL: &str = "https://jst-server.fly.dev/translate";
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_STATUS_RESPONSE_BYTES: usize = 8 * 1024;
 const INSTALLATION_ID_HEADER: &str = "x-jst-installation-id";
 const CONFIRMATION_WIDTH: usize = 88;
 const MAX_MANUAL_COMMAND_BYTES: usize = 2 * 1024;
@@ -25,7 +27,7 @@ const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
     name = "jst",
     version,
     about = "Turn plain English into a shell command and run it",
-    after_help = "Examples:\n  jst show the 10 largest files here\n  jst --dry find files larger than 500 MB\n  jst -i remove stopped Docker containers\n\nUse --dry to preview or -i to review before running."
+    after_help = "Examples:\n  jst show the 10 largest files here\n  jst --dry find files larger than 500 MB\n  jst -i remove stopped Docker containers\n  jst --status\n\nUse --dry to preview or -i to review before running."
 )]
 struct Cli {
     /// Skip all safety confirmations
@@ -40,8 +42,12 @@ struct Cli {
     #[arg(long, conflicts_with = "interactive")]
     dry: bool,
 
+    /// Check server health, models, and aggregate usage
+    #[arg(long, conflicts_with_all = ["yolo", "interactive", "dry", "prompt"])]
+    status: bool,
+
     /// What you want to do, in plain English
-    #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+    #[arg(required_unless_present = "status", num_args = 1.., trailing_var_arg = true)]
     prompt: Vec<String>,
 }
 
@@ -101,6 +107,11 @@ async fn run() -> Result<(), JstError> {
     }
 
     let cli = Cli::parse();
+    if cli.status {
+        let status = fetch_server_status().await?;
+        return print_server_status(&status);
+    }
+
     let input = cli.prompt.join(" ");
     let use_color = should_use_color();
     let interactive = cli.interactive;
@@ -193,11 +204,7 @@ async fn translate(
         revision,
     };
     let api_url = std::env::var("JST_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|_| JstError::Network)?;
+    let client = http_client(Duration::from_secs(30))?;
     let installation_id =
         installation::installation_id().map_err(|error| JstError::Other(format!("{error}")))?;
 
@@ -219,6 +226,78 @@ async fn translate(
     }
 
     serde_json::from_str(&body).map_err(|_| JstError::Deserialization)
+}
+
+async fn fetch_server_status() -> Result<ServerStatusResponse, JstError> {
+    let api_url = std::env::var("JST_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+    let status_url = std::env::var("JST_STATUS_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .map(Ok)
+        .unwrap_or_else(|| status_url_for(&api_url))?;
+    let response = http_client(Duration::from_secs(5))?
+        .get(status_url)
+        .send()
+        .await
+        .map_err(|_| JstError::Network)?;
+    let status = response.status();
+    let body = read_limited_body(response, MAX_STATUS_RESPONSE_BYTES).await?;
+    if !status.is_success() {
+        return Err(JstError::Server(status.as_u16()));
+    }
+
+    serde_json::from_str(&body).map_err(|_| JstError::Deserialization)
+}
+
+fn http_client(timeout: Duration) -> Result<reqwest::Client, JstError> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(timeout)
+        .build()
+        .map_err(|_| JstError::Network)
+}
+
+fn status_url_for(api_url: &str) -> Result<String, JstError> {
+    let mut url = reqwest::Url::parse(api_url)
+        .map_err(|_| JstError::Other("JST_API_URL is not a valid URL".to_string()))?;
+    let path = url.path().trim_end_matches('/');
+    let base = path.strip_suffix("/translate").ok_or_else(|| {
+        JstError::Other(
+            "JST_API_URL must end in /translate to derive the status endpoint; set JST_STATUS_URL explicitly"
+                .to_string(),
+        )
+    })?;
+    let status_path = if base.is_empty() {
+        "/status".to_string()
+    } else {
+        format!("{base}/status")
+    };
+    url.set_path(&status_path);
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.into())
+}
+
+fn print_server_status(status: &ServerStatusResponse) -> Result<(), JstError> {
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "{}", format_server_status(status))
+        .map_err(|error| JstError::Other(format!("{error}")))
+}
+
+fn format_server_status(status: &ServerStatusResponse) -> String {
+    let fallback = status.fallback_model.as_deref().unwrap_or("none");
+    let mut lines = vec![
+        format!("Server: {}", terminal_safe(&status.status)),
+        format!("Primary model: {}", terminal_safe(&status.model)),
+        format!("Fallback model: {}", terminal_safe(fallback)),
+    ];
+    if let Some(usage) = &status.usage {
+        lines.push(format!("Calls today: {}", usage.calls_today));
+        lines.push(format!("Calls all time: {}", usage.calls_total));
+    } else {
+        lines.push("Usage stats: unavailable".to_string());
+    }
+    lines.join("\n")
 }
 
 async fn review_command(
@@ -1083,11 +1162,14 @@ mod tests {
     use super::{
         clean_command, contains_unsafe_terminal_character, format_detailed_explanation,
         format_edit_prompt, format_error, format_proposal_explanation, format_review_prompt,
-        format_warning, indent_wrapped, next_char_end, parse_review_action, previous_char_start,
-        should_confirm, terminal_safe, Cli, JstError, ProposalKind, ReviewAction,
+        format_server_status, format_warning, indent_wrapped, next_char_end, parse_review_action,
+        previous_char_start, should_confirm, status_url_for, terminal_safe, Cli, JstError,
+        ProposalKind, ReviewAction,
     };
     use clap::{error::ErrorKind, CommandFactory, Parser};
-    use jst_shared::{CommandEffects, CommandPart, TranslateResponse};
+    use jst_shared::{
+        CommandEffects, CommandPart, ServerStatusResponse, StatusUsage, TranslateResponse,
+    };
 
     #[test]
     fn strips_markdown_fences() {
@@ -1153,6 +1235,7 @@ mod tests {
         assert!(!cli.yolo);
         assert!(!cli.interactive);
         assert!(!cli.dry);
+        assert!(!cli.status);
     }
 
     #[test]
@@ -1194,6 +1277,7 @@ mod tests {
 
         assert!(output.contains("Examples:"));
         assert!(output.contains("jst show the 10 largest files here"));
+        assert!(output.contains("jst --status"));
         assert!(output.contains("Use --dry to preview or -i to review before running."));
     }
 
@@ -1212,6 +1296,56 @@ mod tests {
             .expect("trailing prompt values may begin with a hyphen");
 
         assert_eq!(cli.prompt.join(" "), "show git --version");
+    }
+
+    #[test]
+    fn accepts_status_without_a_prompt_and_rejects_conflicts() {
+        let cli = Cli::try_parse_from(["jst", "--status"]).expect("status is standalone");
+        assert!(cli.status);
+        assert!(cli.prompt.is_empty());
+
+        assert!(Cli::try_parse_from(["jst", "--status", "show", "files"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--status", "--dry"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--status", "--interactive"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--status", "--yolo"]).is_err());
+    }
+
+    #[test]
+    fn derives_status_endpoint_beside_translate_endpoint() {
+        assert_eq!(
+            status_url_for("https://example.com/translate").unwrap(),
+            "https://example.com/status"
+        );
+        assert_eq!(
+            status_url_for("http://localhost:8080/api/translate?token=secret").unwrap(),
+            "http://localhost:8080/api/status"
+        );
+        assert!(status_url_for("https://example.com/custom").is_err());
+    }
+
+    #[test]
+    fn formats_available_and_unavailable_server_status() {
+        let status = ServerStatusResponse {
+            status: "ok".to_string(),
+            model: "primary/model".to_string(),
+            fallback_model: Some("fallback/model".to_string()),
+            usage: Some(StatusUsage {
+                calls_today: 7,
+                calls_total: 42,
+            }),
+        };
+        assert_eq!(
+            format_server_status(&status),
+            "Server: ok\nPrimary model: primary/model\nFallback model: fallback/model\nCalls today: 7\nCalls all time: 42"
+        );
+
+        let unavailable = ServerStatusResponse {
+            fallback_model: None,
+            usage: None,
+            ..status
+        };
+        assert!(format_server_status(&unavailable).contains("Fallback model: none"));
+        assert!(format_server_status(&unavailable).contains("Usage stats: unavailable"));
     }
 
     #[test]

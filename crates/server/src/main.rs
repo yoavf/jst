@@ -13,12 +13,13 @@ mod openai_compatible;
 mod rate_limit;
 mod stats;
 
-use jst_shared::{ErrorResponse, TranslateRequest};
+use jst_shared::{ErrorResponse, ServerStatusResponse, StatusUsage, TranslateRequest};
 
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024;
 const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
+const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 const MONTH: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
@@ -147,6 +148,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(health))
         .route("/health", get(health))
+        .route("/status", get(server_status))
         .route("/translate", post(translate))
         .route("/stats", get(usage_stats))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -170,6 +172,38 @@ async fn main() {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn server_status(State(state): State<AppState>) -> Json<ServerStatusResponse> {
+    let usage = if let Some(stats) = &state.stats {
+        match tokio::time::timeout(STATUS_STATS_TIMEOUT, stats.snapshot()).await {
+            Ok(Ok(snapshot)) => Some(status_usage(&snapshot)),
+            Ok(Err(error)) => {
+                error!("Status stats error: {error}");
+                None
+            }
+            Err(_) => {
+                error!("Status stats timed out");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    Json(ServerStatusResponse {
+        status: "ok".to_string(),
+        model: state.llm_model,
+        fallback_model: state.llm_fallback_model,
+        usage,
+    })
+}
+
+fn status_usage(snapshot: &stats::StatsSnapshot) -> StatusUsage {
+    StatusUsage {
+        calls_today: snapshot.daily.last().map_or(0, |day| day.count),
+        calls_total: snapshot.total,
+    }
 }
 
 async fn usage_stats(State(state): State<AppState>) -> Response {
@@ -554,8 +588,8 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        request_fingerprint, request_limit_fingerprints, validate_request, with_usage_headers,
-        UsageHeaders,
+        request_fingerprint, request_limit_fingerprints, status_usage, validate_request,
+        with_usage_headers, UsageHeaders,
     };
     use axum::{
         http::{HeaderMap, HeaderValue, StatusCode},
@@ -676,5 +710,29 @@ mod tests {
         assert_eq!(headers["x-ratelimit-daily-ip-remaining"], "99");
         assert_eq!(headers["x-ratelimit-global-daily-limit"], "5000");
         assert_eq!(headers["x-ratelimit-global-daily-remaining"], "4999");
+    }
+
+    #[test]
+    fn summarizes_total_and_current_day_for_status() {
+        let snapshot = super::stats::StatsSnapshot {
+            total: 42,
+            top_commands: Vec::new(),
+            daily: vec![
+                super::stats::DayCount {
+                    date: "2026-07-21".to_string(),
+                    count: 5,
+                },
+                super::stats::DayCount {
+                    date: "2026-07-22".to_string(),
+                    count: 7,
+                },
+            ],
+            generated_at: 0,
+        };
+
+        let usage = status_usage(&snapshot);
+
+        assert_eq!(usage.calls_today, 7);
+        assert_eq!(usage.calls_total, 42);
     }
 }

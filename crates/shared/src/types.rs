@@ -89,9 +89,28 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerStatusResponse {
+    pub status: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<StatusUsage>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusUsage {
+    pub calls_today: u64,
+    pub calls_total: u64,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CommandEffects, CommandRevision, TranslateRequest, TranslateResponse};
+    use super::{
+        CommandEffects, CommandRevision, ServerStatusResponse, StatusUsage, TranslateRequest,
+        TranslateResponse,
+    };
 
     fn response(effects: CommandEffects) -> TranslateResponse {
         TranslateResponse {
@@ -227,5 +246,34 @@ mod tests {
         assert!(!serde_json::to_string(&ordinary_response)
             .expect("serializes")
             .contains("\"parts\""));
+    }
+
+    #[test]
+    fn status_response_omits_unavailable_optional_fields() {
+        let status = ServerStatusResponse {
+            status: "ok".to_string(),
+            model: "primary/model".to_string(),
+            fallback_model: None,
+            usage: None,
+        };
+        let json = serde_json::to_string(&status).expect("serializes");
+
+        assert!(!json.contains("fallback_model"));
+        assert!(!json.contains("usage"));
+
+        let status = ServerStatusResponse {
+            fallback_model: Some("fallback/model".to_string()),
+            usage: Some(StatusUsage {
+                calls_today: 7,
+                calls_total: 42,
+            }),
+            ..status
+        };
+        let round_trip = serde_json::from_str::<ServerStatusResponse>(
+            &serde_json::to_string(&status).expect("serializes"),
+        )
+        .expect("deserializes");
+
+        assert_eq!(round_trip, status);
     }
 }
