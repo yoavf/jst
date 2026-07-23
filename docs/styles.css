@@ -90,10 +90,17 @@ code {
 
 .site-header nav {
   display: flex;
-  gap: clamp(1.8rem, 4vw, 4rem);
+  align-items: center;
+  gap: clamp(0.9rem, 2vw, 2rem);
   color: var(--blue-dark);
   font-family: "Kalam", cursive;
   font-size: clamp(1.1rem, 1.6vw, 1.4rem);
+}
+
+.nav-separator {
+  color: var(--orange);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.8em;
 }
 
 .site-header nav a {
@@ -433,26 +440,25 @@ h1 {
   transform: rotate(-0.35deg) translateY(-1px);
 }
 
-.install-block p {
-  margin: 0.85rem 0 0 1.2rem;
-  color: var(--blue);
-  font-family: "Kalam", cursive;
-  font-size: 1.05rem;
+.install-block {
+  width: fit-content;
+  max-width: 100%;
 }
 
-.reasonable-use-note {
-  margin-left: 0.08em;
-  color: var(--orange);
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.8em;
-  font-weight: 600;
+.platform-downloads {
+  display: inline-block;
+  margin: 0.75rem 0.35rem 0;
+  color: var(--blue-dark);
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.35;
   text-decoration: none;
 }
 
-.version {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.8em;
-  color: rgb(24 23 22 / 35%);
+.platform-downloads:hover,
+.platform-downloads:focus-visible {
+  text-decoration-line: underline;
+  text-decoration-color: var(--orange);
 }
 
 .another-example {
@@ -564,6 +570,10 @@ h3 {
 
 .motivation-body p:last-child {
   margin-bottom: 0;
+}
+
+.motivation-body code {
+  white-space: nowrap;
 }
 
 .motivation-note {
@@ -793,6 +803,25 @@ h3 {
   max-width: 28rem;
 }
 
+.usage-privacy-link {
+  border: 0;
+  padding: 0;
+  color: var(--blue-dark);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--orange);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
+}
+
+.usage-privacy-link:hover,
+.usage-privacy-link:focus-visible {
+  color: var(--blue);
+}
+
 .usage-note {
   margin-top: 0rem;
   color: var(--blue);
@@ -853,6 +882,170 @@ h3 {
 }
 
 .site-footer p {
+  margin: 0;
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.footer-links svg {
+  display: block;
+}
+
+.footer-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.22em;
+}
+
+.footer-link:hover,
+.footer-link:focus-visible {
+  color: var(--blue);
+  text-decoration-color: var(--orange);
+}
+
+.privacy-dialog {
+  width: min(54rem, calc(100% - 2rem));
+  max-width: none;
+  max-height: calc(100svh - 2rem);
+  border: var(--rule) solid var(--ink);
+  padding: 0;
+  color: var(--ink);
+  background: var(--paper);
+  box-shadow: 12px 12px 0 var(--blue);
+}
+
+.privacy-dialog::backdrop {
+  background: rgb(12 18 35 / 62%);
+  backdrop-filter: blur(2px);
+}
+
+.privacy-sheet {
+  position: relative;
+  padding: clamp(2rem, 4vw, 3.2rem);
+  background:
+    linear-gradient(96deg, transparent 0 48%, rgb(24 23 22 / 3%) 50%, transparent 52%),
+    repeating-radial-gradient(circle at 0 0, rgb(20 18 14 / 2.4%) 0 0.6px, transparent 0.8px 4px),
+    var(--paper);
+}
+
+.privacy-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.2rem;
+  border: 0;
+  border-bottom: 2px solid var(--blue);
+  padding: 0.15rem 0;
+  color: var(--blue);
+  background: transparent;
+  cursor: pointer;
+  font-family: "Kalam", cursive;
+  font-size: 1rem;
+  transform: rotate(1deg);
+}
+
+.privacy-close:hover,
+.privacy-close:focus-visible {
+  border-color: var(--orange);
+}
+
+.privacy-kicker {
+  margin-bottom: 1.1rem;
+  color: var(--orange);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.privacy-dialog h2 {
+  margin-bottom: 1.2rem;
+  color: var(--blue);
+  font-family: "Archivo Black", sans-serif;
+  font-size: clamp(3rem, 7vw, 5rem);
+  font-weight: 400;
+  letter-spacing: -0.055em;
+  line-height: 0.86;
+}
+
+.privacy-intro {
+  max-width: 35rem;
+  margin-bottom: 1.6rem;
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.privacy-details {
+  display: grid;
+  margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.privacy-details > div {
+  border-top: 2px solid var(--blue);
+  padding: 1rem 1.1rem 0 0;
+}
+
+.privacy-details > div + div {
+  border-left: 1px solid rgb(24 23 22 / 16%);
+  padding-left: 1.1rem;
+}
+
+.privacy-details dt {
+  margin-bottom: 0.55rem;
+  color: var(--blue-dark);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.privacy-details dd {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.privacy-details code {
+  color: var(--blue-dark);
+  font-size: 0.9em;
+}
+
+.privacy-advice {
+  margin: 1.4rem 0 0;
+  border-left: 3px solid var(--orange);
+  padding: 0.55rem 0 0.55rem 0.85rem;
+  color: var(--blue-dark);
+  font-family: "Kalam", cursive;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.privacy-advice span {
+  color: var(--orange);
+}
+
+.privacy-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.2rem;
+  color: rgb(24 23 22 / 58%);
+  font-size: 0.72rem;
+}
+
+.privacy-meta p {
   margin: 0;
 }
 
@@ -1160,7 +1353,40 @@ h3 {
   }
 
   .site-header nav {
-    gap: 1.2rem;
+    gap: 0.55rem;
+  }
+
+  .privacy-dialog {
+    width: calc(100% - 1rem);
+    max-height: calc(100svh - 1rem);
+    box-shadow: 6px 6px 0 var(--blue);
+  }
+
+  .privacy-sheet {
+    padding: 3.5rem 1.2rem 1.5rem;
+  }
+
+  .privacy-dialog h2 {
+    font-size: clamp(3rem, 18vw, 4.8rem);
+  }
+
+  .privacy-details {
+    display: block;
+  }
+
+  .privacy-details > div {
+    padding: 0.85rem 0 1rem;
+  }
+
+  .privacy-details > div + div {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .privacy-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
   }
 
   .hero {
@@ -1207,7 +1433,7 @@ h3 {
     margin-left: auto;
   }
 
-  .install-block p {
+  .platform-downloads {
     margin-left: 0;
   }
 

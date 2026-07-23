@@ -40,7 +40,9 @@
     <header class="site-header wrap">
       <nav aria-label="Main navigation">
         <a href="#notes">Notes</a>
+        <span class="nav-separator" aria-hidden="true">·</span>
         <a href="#stats">Stats</a>
+        <span class="nav-separator" aria-hidden="true">·</span>
         <a href="https://github.com/yoavf/jst">GitHub</a>
       </nav>
     </header>
@@ -85,7 +87,7 @@
               <code>brew install yoavf/tap/jst</code>
               <span class="copy-state" aria-live="polite">copy</span>
             </button>
-            <p>Free for reasonable use<a class="reasonable-use-note" href="#free-use" aria-label="Read the note on reasonable use">*</a> <span aria-hidden="true">·</span> or BYOK <span aria-hidden="true">·</span> open source <span class="version">v__VERSION__</span></p>
+            <a class="platform-downloads" href="https://github.com/yoavf/jst/releases/latest">Linux &amp; Windows binaries <span aria-hidden="true">→</span></a>
           </div>
         </div>
 
@@ -103,7 +105,7 @@
             <p class="motivation-lede">With coding agents doing most of the work, I’ve started forgetting the syntax for commands like <code>find</code> or <code>git</code>.</p>
             <div class="motivation-body">
               <p>Sure, I can ask an LLM how to do it and copy the text to the terminal, but where's the fun in that?</p>
-              <p>So I made <code>jst</code> ("just"). Just type what you need in plain English (or any language actually). Jst will turns that into shell, shows you what it will run, and run it. It will try and ask for permission before destructive commands, but you can use <code>--dry</code> or <code>--interactive</code> to stay safe.</p>
+              <p>So I made <code>jst</code> ("just"). Just type what you need in plain English (or any language, actually). JST turns that into shell, shows you what it will run, and runs it. Risky commands require confirmation; use <code>--dry</code> to preview or <code>--interactive</code> to review every command.</p>
             </div>
             <p class="motivation-note" aria-hidden="true"><span>$</span> jst find files I changed today</p>
           </div>
@@ -188,8 +190,13 @@
           <div class="usage-option usage-option--hosted">
             <p class="option-label">On me</p>
             <h3>Small model,<br />small bill.</h3>
-            <p><code>jst</code>  queries run on a small, fast model, so they’re cheap to run. My budget should be enough for around 200,000 queries each month.</p>
-            <p><b>Note:</b> nothing is saved on the server, except aggregate anonymized stats.</p>
+            <p>Hosted <code>jst</code> runs on a small, fast model, so I’m covering the bill. At current prices, my capped monthly budget should stretch to roughly 200,000 translations. There are a few lightweight guardrails against abuse, but mostly I’m trusting people to be reasonable so it can stay up and free.</p>
+            <p class="usage-privacy-note">
+              No prompts are stored.
+              <button class="usage-privacy-link" type="button" data-privacy-open aria-haspopup="dialog">
+                Read the privacy note <span aria-hidden="true">→</span>
+              </button>
+            </p>
           </div>
 
           <span class="or-mark" aria-hidden="true">or</span>
@@ -237,14 +244,57 @@
       <section class="last-note">
         <div class="wrap last-note-inner">
           <p>That’s it, really.</p>
-          <a href="https://github.com/yoavf/jst">Read the source <span aria-hidden="true">→</span></a>
+          <a href="https://github.com/yoavf/jst">See on Github&nbsp;<span aria-hidden="true">→</span></a>
         </div>
       </section>
     </main>
 
     <footer class="site-footer wrap">
-      <p><a href="https://x.com/yoavf">@yoavf</a> did this</p>
-      <p><a href="https://github.com/yoavf/jst/blob/main/LICENSE">MIT</a> licensed. <a href="https://github.com/yoavf" aria-label="GitHub"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a> <a href="https://linkedin.com/in/yoavf" aria-label="LinkedIn"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 1.146v13.708c0 .633-.526 1.146-1.175 1.146H1.175C.526 16 0 15.487 0 14.854V1.146zm4.943 12.248V6.169H2.542v7.225h2.401zm-1.2-8.212c.837 0 1.358-.554 1.358-1.248-.015-.709-.52-1.248-1.342-1.248-.822 0-1.359.54-1.359 1.248 0 .694.521 1.248 1.327 1.248h.016zm4.908 8.212V9.359c0-.216.016-.432.08-.586.173-.431.568-.878 1.232-.878.869 0 1.216.662 1.216 1.634v3.865h2.401V9.25c0-2.22-1.184-3.252-2.764-3.252-1.274 0-1.845.7-2.165 1.193v.025h-.016a5.54 5.54 0 0 1 .016-.025V6.169h-2.4c.03.678 0 7.225 0 7.225h2.4z"/></svg></a></p>
+      <p class="footer-links">
+        <span><a href="https://x.com/yoavf">@yoavf</a> did this</span>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/yoavf" aria-label="GitHub">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <a href="https://linkedin.com/in/yoavf" aria-label="LinkedIn">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 1.146v13.708c0 .633-.526 1.146-1.175 1.146H1.175C.526 16 0 15.487 0 14.854V1.146zm4.943 12.248V6.169H2.542v7.225h2.401zm-1.2-8.212c.837 0 1.358-.554 1.358-1.248-.015-.709-.52-1.248-1.342-1.248-.822 0-1.359.54-1.359 1.248 0 .694.521 1.248 1.327 1.248h.016zm4.908 8.212V9.359c0-.216.016-.432.08-.586.173-.431.568-.878 1.232-.878.869 0 1.216.662 1.216 1.634v3.865h2.401V9.25c0-2.22-1.184-3.252-2.764-3.252-1.274 0-1.845.7-2.165 1.193v.025h-.016a5.54 5.54 0 0 1 .016-.025V6.169h-2.4c.03.678 0 7.225 0 7.225h2.4z"/></svg>
+        </a>
+      </p>
+      <p class="footer-links">
+        <span><a href="https://github.com/yoavf/jst/blob/main/LICENSE">MIT</a> licensed</span>
+        <span aria-hidden="true">·</span>
+        <button class="footer-link" type="button" data-privacy-open aria-haspopup="dialog">Privacy</button>
+      </p>
     </footer>
+
+    <dialog class="privacy-dialog" id="privacy-dialog" aria-labelledby="privacy-title">
+      <div class="privacy-sheet">
+        <button class="privacy-close" type="button" data-privacy-close aria-label="Close privacy information">close <span aria-hidden="true">×</span></button>
+        <p class="privacy-kicker">privacy / the short version</p>
+        <h2 id="privacy-title">No funny<br />business.</h2>
+        <p class="privacy-intro">JST needs to send your request away to translate it. It doesn’t need to remember it.</p>
+
+        <dl class="privacy-details">
+          <div>
+            <dt>A translation</dt>
+            <dd>The words you type, your operating system and shell, and any AI revision instruction go to the hosted JST server. The server routes them through OpenRouter to a model provider. The generated command runs only on your machine.</dd>
+          </div>
+          <div>
+            <dt>What JST keeps</dt>
+            <dd>The JST app does not persist prompts, paths, arguments, or complete generated commands. Temporary in-memory hashes enforce rate limits. Aggregate stats keep totals and the base command name—like <code>find</code> or <code>git</code>—never its arguments.</dd>
+          </div>
+          <div>
+            <dt>This website</dt>
+            <dd>Counter.dev records anonymous aggregate visits such as pages viewed, country, browser, operating system, and screen size. JST does not use advertising trackers.</dd>
+          </div>
+        </dl>
+
+        <p class="privacy-advice"><span aria-hidden="true">✦</span> One sensible rule: don’t put passwords, keys, or other secrets in a prompt.</p>
+        <div class="privacy-meta">
+          <p>Last updated July 23, 2026.</p>
+          <p><a href="https://openrouter.ai/privacy">OpenRouter</a> <span aria-hidden="true">·</span> <a href="https://counter.dev/pages/privacy.html">Counter.dev</a> <span aria-hidden="true">·</span> <a href="https://github.com/yoavf/jst">source</a></p>
+        </div>
+      </div>
+    </dialog>
   </body>
 </html>

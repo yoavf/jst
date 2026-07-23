@@ -66,6 +66,9 @@ const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const cursorElement = document.querySelector(".terminal-cursor");
 const spinnerElement = document.querySelector(".terminal-spinner");
 const mapElement = document.querySelector(".translation-map");
+const privacyDialog = document.querySelector("#privacy-dialog");
+const privacyOpenButtons = document.querySelectorAll("[data-privacy-open]");
+const privacyCloseButton = document.querySelector("[data-privacy-close]");
 
 let exampleIndex = 0;
 let animationRun = 0;
@@ -263,9 +266,30 @@ copyButton?.addEventListener("click", async () => {
   }
 });
 
+privacyOpenButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    privacyDialog?.showModal();
+  });
+});
+
+privacyCloseButton?.addEventListener("click", () => {
+  privacyDialog?.close();
+});
+
+privacyDialog?.addEventListener("click", (event) => {
+  if (event.target === privacyDialog) privacyDialog.close();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && privacyDialog?.open) {
+    event.preventDefault();
+    privacyDialog.close();
+  }
+});
+
 window.requestAnimationFrame(() => {
   exampleIndex = 0;
-  showExample(exampleIndex);
+  showExample(exampleIndex, false);
 });
 
 // --- Live usage stats -------------------------------------------------
