@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 const DEFAULT_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODELS: &[&str] = &["microsoft/phi-4", "google/gemma-4-26b-a4b-it"];
 
 #[derive(Clone, Copy)]
 enum EffectExpectation {
@@ -143,7 +142,7 @@ struct Results {
 }
 
 struct BenchmarkConfig {
-    api_key: String,
+    api_key: Option<String>,
     api_url: String,
     os: String,
     shell: String,
@@ -152,10 +151,13 @@ struct BenchmarkConfig {
 
 impl BenchmarkConfig {
     fn from_env() -> Result<Self, &'static str> {
-        let api_key = std::env::var("OPENROUTER_API_KEY")
-            .map_err(|_| "set OPENROUTER_API_KEY to run model benchmarks")?;
         let api_url =
             std::env::var("JST_BENCHMARK_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+        let api_key = benchmark_api_key(
+            &api_url,
+            std::env::var("JST_BENCHMARK_API_KEY").ok(),
+            std::env::var("OPENROUTER_API_KEY").ok(),
+        )?;
         let os = std::env::var("JST_BENCHMARK_OS").unwrap_or_else(|_| "macos".to_string());
         let shell = std::env::var("JST_BENCHMARK_SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let runs = std::env::var("JST_BENCHMARK_RUNS")
@@ -175,8 +177,8 @@ impl BenchmarkConfig {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let models = benchmark_models()?;
     let config = BenchmarkConfig::from_env()?;
-    let models = benchmark_models();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
         .build()?;
@@ -195,16 +197,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-fn benchmark_models() -> Vec<String> {
+fn benchmark_models() -> Result<Vec<String>, &'static str> {
     let models: Vec<_> = std::env::args().skip(1).collect();
     if models.is_empty() {
-        DEFAULT_MODELS
-            .iter()
-            .map(|model| model.to_string())
-            .collect()
+        Err("pass one or more model IDs after --")
     } else {
-        models
+        Ok(models)
     }
+}
+
+fn benchmark_api_key(
+    api_url: &str,
+    benchmark_api_key: Option<String>,
+    openrouter_api_key: Option<String>,
+) -> Result<Option<String>, &'static str> {
+    if let Some(api_key) = benchmark_api_key {
+        return Ok((!api_key.is_empty()).then_some(api_key));
+    }
+    if api_url == DEFAULT_API_URL {
+        return openrouter_api_key
+            .map(Some)
+            .ok_or("set OPENROUTER_API_KEY or JST_BENCHMARK_API_KEY");
+    }
+    Ok(None)
 }
 
 async fn benchmark_model(client: &reqwest::Client, config: &BenchmarkConfig, model: &str) {
@@ -326,12 +341,11 @@ async fn request_translation(
         },
     };
 
-    let response = client
-        .post(&config.api_url)
-        .bearer_auth(&config.api_key)
-        .json(&body)
-        .send()
-        .await?;
+    let mut request = client.post(&config.api_url).json(&body);
+    if let Some(api_key) = &config.api_key {
+        request = request.bearer_auth(api_key);
+    }
+    let response = request.send().await?;
     let status = response.status();
     let text = response.text().await?;
     if !status.is_success() {
@@ -380,7 +394,8 @@ fn pass_mark(passed: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        effects_match, median_latency, strip_json_fence, terminal_safe, EffectExpectation,
+        benchmark_api_key, effects_match, median_latency, strip_json_fence, terminal_safe,
+        EffectExpectation, DEFAULT_API_URL,
     };
     use jst_shared::CommandEffects;
     use std::time::Duration;
@@ -445,5 +460,33 @@ mod tests {
             terminal_safe("echo ok\n\u{1b}[31m"),
             "echo ok\\n\\u{1b}[31m"
         );
+    }
+
+    #[test]
+    fn never_sends_an_openrouter_key_to_an_alternate_endpoint() {
+        let key = benchmark_api_key(
+            "http://localhost:8000/v1/chat/completions",
+            None,
+            Some("openrouter-secret".to_string()),
+        )
+        .unwrap();
+        assert_eq!(key, None);
+
+        let key = benchmark_api_key(
+            "https://another-provider.example/v1/chat/completions",
+            Some("provider-secret".to_string()),
+            Some("openrouter-secret".to_string()),
+        )
+        .unwrap();
+        assert_eq!(key.as_deref(), Some("provider-secret"));
+    }
+
+    #[test]
+    fn uses_openrouter_key_only_for_the_default_endpoint() {
+        let key = benchmark_api_key(DEFAULT_API_URL, None, Some("openrouter-secret".to_string()))
+            .unwrap();
+        assert_eq!(key.as_deref(), Some("openrouter-secret"));
+
+        assert!(benchmark_api_key(DEFAULT_API_URL, None, None).is_err());
     }
 }

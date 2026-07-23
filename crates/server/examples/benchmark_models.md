@@ -23,9 +23,9 @@ cargo run --release -p jst-server --example benchmark_models -- \
   google/gemma-4-26b-a4b-it | tee /tmp/jst-model-benchmark.txt
 ```
 
-With no model arguments, the script runs the models currently configured for
-the hosted service. It defaults to one pass over 20 cases targeting macOS and
-zsh. These environment variables can change a run:
+Model arguments are required so a later production-model change cannot silently
+change the comparison set. The script defaults to one pass over 20 cases
+targeting macOS and zsh. These environment variables can change a run:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -33,11 +33,20 @@ zsh. These environment variables can change a run:
 | `JST_BENCHMARK_OS` | `macos` | Target OS included in the JST system prompt |
 | `JST_BENCHMARK_SHELL` | `/bin/zsh` | Target shell included in the JST system prompt |
 | `JST_BENCHMARK_API_URL` | OpenRouter chat completions | Alternate compatible provider endpoint |
+| `JST_BENCHMARK_API_KEY` | none | Bearer token for an alternate endpoint |
+
+When using the default OpenRouter endpoint, `OPENROUTER_API_KEY` is used unless
+`JST_BENCHMARK_API_KEY` is set. An alternate endpoint receives only
+`JST_BENCHMARK_API_KEY`; omit it for a local API that needs no authentication.
 
 Use several runs when comparing latency: provider routing, warm-up, and load can
 make a single pass noisy. The average and median include only responses that
 were received and parsed successfully; the parsed count makes exclusions
 visible.
+
+The included cases are a public regression suite, not a blind benchmark. Use
+fresh or withheld cases as well when making a model-selection claim, especially
+after prompts or models have been tuned against this suite.
 
 ## Review command quality
 

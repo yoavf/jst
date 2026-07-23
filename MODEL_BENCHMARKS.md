@@ -1,37 +1,37 @@
-# OpenRouter Model Benchmarks
+# Model benchmark notes
 
-Measured on July 20, 2026 from Israel through OpenRouter. Each case requested a
-shell command plus structured effect classification. The suite covers safe file
-search, Git status, deletion, package installation, file movement, service
-restart, downloaded-code execution, and S3 upload.
+The hosted service currently uses Phi-4 as its primary model and Gemma 4 26B as
+its fallback. The selection came from a 20-case comparison run from Israel
+through OpenRouter on July 22, 2026, targeting macOS and zsh.
 
-Prices are dollars per million input/output tokens. Commands per $20 assumes
-400 input and 150 output tokens per request and excludes OpenRouter funding fees,
-retries, and hosting costs.
+| Model | Commands | Effects | Parsed | Average | Median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Microsoft Phi-4 | 16/20 | 19/20 | 20/20 | 1.66s | 1.63s |
+| Google Gemma 4 26B A4B | 16/20 | 20/20 | 20/20 | 2.61s | 2.19s |
+| Mistral Small 3.2 24B | 15/20 | 20/20 | 20/20 | 2.27s | 2.28s |
+| Poolside Laguna XS 2.1 | 15/20 | 19/20 | 20/20 | 2.62s | 2.52s |
+| Google Gemma 3 27B | 15/20 | 15/20 | 19/20 | 8.26s | 7.16s |
+| Nex N2 Mini | 13/20 | 16/20 | 16/20 | 3.53s | 2.68s |
+| IBM Granite 4.1 8B | 11/20 | 19/20 | 20/20 | 1.41s | 1.31s |
+| Cohere Command R7B | 10/20 | 16/20 | 19/20 | 1.94s | 1.81s |
 
-| Rank | Model | Command | Effects | Average | Input / Output | Commands / $20 |
-|---:|---|---:|---:|---:|---:|---:|
-| 1 | Gemini 2.5 Flash Lite | 24/24 | 24/24 | 0.69s | $0.10 / $0.40 | 200,000 |
-| 2 | Granite 4.1 8B | 8/8 | 8/8 | 1.21s | $0.05 / $0.10 | 571,000 |
-| 3 | GPT-4.1 Nano | 8/8 | 8/8 | 0.98s | $0.10 / $0.40 | 200,000 |
-| 4 | Llama 4 Scout | 8/8 | 8/8 | 1.12s | $0.10 / $0.30 | 235,000 |
-| 5 | Phi-4 | 21/24 | 24/24 | 1.33s | $0.07 / $0.14 | 408,000 |
-| 6 | Command R7B | 24/24 | 23/24 | 2.05s | $0.0375 / $0.15 | 533,000 |
-| 7 | Granite 4.0 Micro | 24/24 | 24/24 | 4.48s | $0.017 / $0.112 | 847,000 |
-| 8 | Amazon Nova Lite | 8/8 | 7/8 | 0.86s | $0.06 / $0.24 | 333,000 |
-| 9 | Codestral 2508 | 7/8 | 6/8 | 0.94s | $0.30 / $0.90 | 78,000 |
-| 10 | Qwen3 Next 80B A3B Thinking | 5/8 | 4/8 | 16.30s | $0.0975 / $0.78 | 128,000* |
+Command scores were manually reviewed for correctness on the target platform.
+Effects were compared with expected safety metadata. Latency covers successfully
+parsed responses only. This was one run per case, so the timing numbers are
+directional rather than a durable provider-performance ranking.
 
-`*` Reasoning tokens can reduce the real command count.
+The cases are public and should be treated as a regression suite. Future model
+selection should also use fresh or withheld cases to reduce test-set tuning and
+contamination. Model routes, behavior, availability, and pricing can all change,
+so rerun the benchmark instead of treating this table as permanent.
 
-Granite 4.1 8B is the selected default. A follow-up worktree test exposed a
-correctness gap not covered by the original suite: Granite generated a complete
-`git worktree add` command 5/5 times at 1.14s average, while Gemini omitted the
-required worktree path 5/5 times at 1.35s average. Granite also passed a
-post-review run with all response fields required at 8/8 commands and 8/8
-effect classifications. Model and provider performance varies over time, so
-rerun:
+See the [benchmark documentation](crates/server/examples/benchmark_models.md)
+for configuration, output interpretation, and the reusable manual-review prompt.
+For example:
 
 ```sh
-OPENROUTER_API_KEY=... cargo run -p jst-server --example benchmark_models
+export OPENROUTER_API_KEY=...
+cargo run --release -p jst-server --example benchmark_models -- \
+  microsoft/phi-4 \
+  google/gemma-4-26b-a4b-it
 ```
