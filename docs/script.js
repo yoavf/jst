@@ -271,6 +271,7 @@ window.requestAnimationFrame(() => {
 // --- Live usage stats -------------------------------------------------
 
 const STATS_URL = "https://jst-server.fly.dev/stats";
+const STATS_REFRESH_INTERVAL_MS = 60_000;
 const MAX_COMMAND_BARS = 10;
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -362,8 +363,16 @@ async function loadStats() {
   statsSection.hidden = false;
 }
 
+async function refreshStats() {
+  try {
+    await loadStats();
+  } catch {
+    // Stats are best-effort: keep the current view until the next refresh.
+  } finally {
+    window.setTimeout(refreshStats, STATS_REFRESH_INTERVAL_MS);
+  }
+}
+
 if (statsSection) {
-  loadStats().catch(() => {
-    // Stats are best-effort: keep the section hidden when unavailable.
-  });
+  refreshStats();
 }
