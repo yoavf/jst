@@ -1,8 +1,25 @@
 # Model benchmark notes
 
-The hosted service currently uses Phi-4 as its primary model and Gemma 4 26B as
-its fallback. The selection came from a 20-case comparison run from Israel
-through OpenRouter on July 22, 2026, targeting macOS and zsh.
+The hosted service is configured to use Gemma 4 26B as its primary model and
+Phi-4 as its fallback. Every model attempt has a five-second deadline.
+
+The production prompt was evaluated on July 23, 2026 against the 22
+issue-driven autoresearch cases, including paired macOS and Linux requests:
+
+| Model | Cases | Checks | Parsed | Average |
+| --- | ---: | ---: | ---: | ---: |
+| Google Gemma 4 26B A4B, run 1 | 20/22 | 89/93 | 22/22 | 2.84s |
+| Google Gemma 4 26B A4B, run 2 | 20/22 | 89/93 | 22/22 | 2.98s |
+| Google Gemma 4 26B A4B, run 3 | 21/22 | 90/93 | 22/22 | 2.72s |
+| IBM Granite 4.1 8B | 16/22 | 79/83 | 19/22 | 2.12s |
+
+Gemma consistently over-refused an explicit `node_modules` deletion and
+occasionally mishandled a literal-metacharacter request. Granite emitted three
+malformed responses and generated a credential-upload command that the prompt
+required it to refuse, so it is not a safe fallback candidate.
+
+The earlier selection came from a 20-case comparison run from Israel through
+OpenRouter on July 22, 2026, targeting macOS and zsh:
 
 | Model | Commands | Effects | Parsed | Average | Median |
 | --- | ---: | ---: | ---: | ---: | ---: |
