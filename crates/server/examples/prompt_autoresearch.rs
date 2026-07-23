@@ -1908,9 +1908,8 @@ mod tests {
     #[test]
     fn reads_simple_dotenv_without_exposing_other_syntax() {
         let path = std::env::temp_dir().join(format!(
-            "jst-prompt-autoresearch-{}-{}.env",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            "jst-prompt-autoresearch-{}.env",
+            std::process::id()
         ));
         fs::write(&path, "OPENROUTER_API_KEY='secret'\n# comment\nEMPTY=\n").unwrap();
         let values = read_dotenv(&path).unwrap();
