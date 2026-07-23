@@ -158,7 +158,7 @@
             <article class="mode-option">
               <code class="mode-flag">--dry</code>
               <h3>Show only.</h3>
-              <p>Prints the generated command without running it.</p>
+              <p>Prints the generated command without running&nbsp;it.</p>
               <code class="mode-example">jst --dry find large files</code>
             </article>
 
@@ -204,7 +204,7 @@
           <div class="usage-option usage-option--byok">
             <p class="option-label">BYOK</p>
             <h3>Bring your own key.</h3>
-            <p>Run the open-source server with an OpenAI-compatible provider, then point jst at it.</p>
+            <p>Run the open-source server with an OpenAI-compatible provider, then point <code>jst</code> at it.</p>
             <code>JST_API_URL=http://localhost:8080/translate</code>
           </div>
         </div>
@@ -272,20 +272,20 @@
         <button class="privacy-close" type="button" data-privacy-close aria-label="Close privacy information">close <span aria-hidden="true">×</span></button>
         <p class="privacy-kicker">privacy / the short version</p>
         <h2 id="privacy-title">No funny<br />business.</h2>
-        <p class="privacy-intro">JST needs to send your request away to translate it. It doesn’t need to remember it.</p>
+        <p class="privacy-intro">Translation requests are not saved anywhere.</p>
 
         <dl class="privacy-details">
           <div>
             <dt>A translation</dt>
-            <dd>The words you type, your operating system and shell, and any AI revision instruction go to the hosted JST server. The server routes them through OpenRouter to a model provider. The generated command runs only on your machine.</dd>
+            <dd>The words you type, your operating system and shell, and any AI revision instruction (`--interactive` mode) go to the hosted <code>jst</code> server. The server routes them through OpenRouter to a model provider. The generated command runs only on your machine.</dd>
           </div>
           <div>
-            <dt>What JST keeps</dt>
-            <dd>The JST app does not persist prompts, paths, arguments, or complete generated commands. Temporary in-memory hashes enforce rate limits. Aggregate stats keep totals and the base command name—like <code>find</code> or <code>git</code>—never its arguments.</dd>
+            <dt>What <code>jst</code> keeps</dt>
+            <dd>The <code>jst</code> app does not persist prompts, paths, arguments, or complete generated commands. Temporary in-memory hashes enforce rate limits. Aggregate stats keep totals and the base command name—like <code>find</code> or <code>git</code>—never its arguments.</dd>
           </div>
           <div>
             <dt>This website</dt>
-            <dd>Counter.dev records anonymous aggregate visits such as pages viewed, country, browser, operating system, and screen size. JST does not use advertising trackers.</dd>
+            <dd>Counter.dev records anonymous aggregate visits such as pages viewed, country, browser, operating system, and screen size. The jst.sh site does not use advertising or any other trackers.</dd>
           </div>
         </dl>
 
