@@ -1,5 +1,6 @@
 use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tracing::warn;
 
 const MAX_LLM_RESPONSE_BYTES: usize = 16 * 1024;
@@ -7,6 +8,7 @@ const MAX_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_EXPLANATION_BYTES: usize = 1024;
 const MAX_EXPLANATION_PARTS: usize = 8;
 const MAX_EXPLANATION_PART_BYTES: usize = 512;
+const MODEL_TIMEOUT: Duration = Duration::from_secs(5);
 // Headroom for reasoning-capable models: thinking tokens count against
 // max_tokens on some providers, and a small budget truncates the JSON output.
 const MAX_OUTPUT_TOKENS: u32 = 2048;
@@ -50,9 +52,36 @@ pub async fn translate(
     fallback_model: Option<&str>,
     req: &TranslateRequest,
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
-    let primary_error = match translate_with_model(client, api_url, api_key, model, req).await {
-        Ok(response) => return Ok(response),
-        Err(error) => error,
+    translate_with_timeout(
+        client,
+        api_url,
+        api_key,
+        model,
+        fallback_model,
+        req,
+        MODEL_TIMEOUT,
+    )
+    .await
+}
+
+async fn translate_with_timeout(
+    client: &reqwest::Client,
+    api_url: &str,
+    api_key: &str,
+    model: &str,
+    fallback_model: Option<&str>,
+    req: &TranslateRequest,
+    model_timeout: Duration,
+) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
+    let primary_error = match tokio::time::timeout(
+        model_timeout,
+        translate_with_model(client, api_url, api_key, model, req),
+    )
+    .await
+    {
+        Ok(Ok(response)) => return Ok(response),
+        Ok(Err(error)) => error,
+        Err(_) => model_timeout_error(model, model_timeout),
     };
 
     let Some(fallback_model) = fallback_model.filter(|fallback| *fallback != model) else {
@@ -66,14 +95,30 @@ pub async fn translate(
         "primary LLM failed, trying fallback"
     );
 
-    translate_with_model(client, api_url, api_key, fallback_model, req)
-        .await
-        .map_err(|fallback_error| {
-            format!(
-                "primary LLM ({model}) failed: {primary_error}; fallback LLM ({fallback_model}) failed: {fallback_error}"
-            )
-            .into()
-        })
+    let fallback_result = match tokio::time::timeout(
+        model_timeout,
+        translate_with_model(client, api_url, api_key, fallback_model, req),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(model_timeout_error(fallback_model, model_timeout)),
+    };
+
+    fallback_result.map_err(|fallback_error| {
+        let message = format!(
+            "primary LLM ({model}) failed: {primary_error}; fallback LLM ({fallback_model}) failed: {fallback_error}"
+        );
+        message.into()
+    })
+}
+
+fn model_timeout_error(model: &str, timeout: Duration) -> Box<dyn std::error::Error + Send + Sync> {
+    format!(
+        "LLM model {model} timed out after {:.1} seconds",
+        timeout.as_secs_f64()
+    )
+    .into()
 }
 
 async fn translate_with_model(
@@ -323,15 +368,18 @@ async fn read_limited_body(
 #[cfg(test)]
 mod tests {
     use super::{
-        sanitize_explanation_parts, strip_code_fence, translate, user_prompt,
-        validate_translation_response,
+        sanitize_explanation_parts, strip_code_fence, translate, translate_with_timeout,
+        user_prompt, validate_translation_response, MODEL_TIMEOUT,
     };
     use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
     use jst_shared::{
         CommandEffects, CommandPart, CommandRevision, TranslateRequest, TranslateResponse,
     };
     use serde_json::{json, Value};
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
 
     fn response(command: String, explanation: String) -> TranslateResponse {
         TranslateResponse {
@@ -478,6 +526,64 @@ mod tests {
         assert_eq!(
             *seen_models.lock().expect("model log"),
             vec!["granite", "gemini"]
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn gives_each_model_its_own_bounded_attempt() {
+        async fn mock_completion(
+            State(seen_models): State<Arc<Mutex<Vec<String>>>>,
+            Json(request): Json<Value>,
+        ) -> StatusCode {
+            let model = request["model"]
+                .as_str()
+                .expect("request model")
+                .to_string();
+            seen_models.lock().expect("model log").push(model);
+            std::future::pending::<()>().await;
+            StatusCode::OK
+        }
+
+        let seen_models = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/chat/completions", post(mock_completion))
+            .with_state(seen_models.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock LLM");
+        let address = listener.local_addr().expect("mock LLM address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock LLM");
+        });
+
+        let request = TranslateRequest {
+            input: "show the current directory".to_string(),
+            os: Some("macos".to_string()),
+            shell: Some("zsh".to_string()),
+            explain: false,
+            revision: None,
+        };
+        let started = Instant::now();
+        let error = translate_with_timeout(
+            &reqwest::Client::new(),
+            &format!("http://{address}/chat/completions"),
+            "",
+            "phi",
+            Some("gemma"),
+            &request,
+            Duration::from_millis(50),
+        )
+        .await
+        .expect_err("both models should time out");
+
+        assert_eq!(MODEL_TIMEOUT, Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(error.to_string().contains("phi"));
+        assert!(error.to_string().contains("gemma"));
+        assert_eq!(
+            *seen_models.lock().expect("model log"),
+            vec!["phi", "gemma"]
         );
         server.abort();
     }

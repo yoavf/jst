@@ -134,7 +134,8 @@ The hosted server currently applies these safeguards:
 - 20 translations per minute per client IP at the Fly proxy.
 - 100 translations per client IP and 5,000 globally per fixed 24-hour window.
 - A 32-request concurrency cap, 512-byte prompts and revision instructions,
-  8 KiB request bodies, bounded model outputs, and provider timeouts.
+  8 KiB request bodies, bounded model outputs, and a five-second timeout for
+  each primary or fallback model attempt.
 - Strict OS and shell metadata validation, with provider details hidden from
   clients and provider outages identified separately from JST server errors.
 - Rate-limit response headers for each active quota.
@@ -151,8 +152,8 @@ OpenAI-compatible chat-completions API. For example, using OpenRouter:
 ```sh
 LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
 LLM_API_KEY=... \
-LLM_MODEL=microsoft/phi-4 \
-LLM_FALLBACK_MODEL=google/gemma-4-26b-a4b-it \
+LLM_MODEL=google/gemma-4-26b-a4b-it \
+LLM_FALLBACK_MODEL=microsoft/phi-4 \
 cargo run --release -p jst-server
 ```
 
