@@ -128,15 +128,27 @@ async fn run() -> Result<(), JstError> {
     }
 
     let command = validated_command(&response)?;
-    print_command(&command, use_color, ProposalKind::Initial)?;
     if cli.dry {
+        print_command(
+            &command,
+            use_color,
+            ProposalKind::Initial,
+            CommandOutput::Stdout,
+        )?;
         return Ok(());
     }
 
     let width = terminal_width();
     let local_warnings = safety::warnings_for_command(&command);
     let model_warnings = response.model_warnings();
-    if should_confirm(cli.yolo, &local_warnings, &model_warnings) {
+    let requires_confirmation = should_confirm(cli.yolo, &local_warnings, &model_warnings);
+    let output = if requires_confirmation {
+        CommandOutput::Stderr
+    } else {
+        CommandOutput::Stdout
+    };
+    print_command(&command, use_color, ProposalKind::Initial, output)?;
+    if requires_confirmation {
         if !response.explanation.is_empty() {
             let explanation = terminal_safe(&response.explanation);
             eprintln!("\n{}", indent_wrapped(&explanation, width));
@@ -312,7 +324,7 @@ async fn review_command(
 
     'proposal: loop {
         let command = validated_command(&response)?;
-        print_command(&command, use_color, proposal_kind)?;
+        print_command(&command, use_color, proposal_kind, CommandOutput::Stderr)?;
 
         if explanation_visible {
             eprintln!(
@@ -400,7 +412,12 @@ async fn review_command(
                     let local_warnings = safety::warnings_for_command(&replacement);
                     if local_warnings.is_empty() {
                         eprintln!();
-                        print_command(&replacement, use_color, ProposalKind::Manual)?;
+                        print_command(
+                            &replacement,
+                            use_color,
+                            ProposalKind::Manual,
+                            CommandOutput::Stderr,
+                        )?;
                         return execute_command(&replacement);
                     }
 
@@ -441,7 +458,30 @@ enum ProposalKind {
     Manual,
 }
 
-fn print_command(command: &str, color: bool, kind: ProposalKind) -> Result<(), JstError> {
+#[derive(Clone, Copy)]
+enum CommandOutput {
+    Stdout,
+    Stderr,
+}
+
+fn print_command(
+    command: &str,
+    color: bool,
+    kind: ProposalKind,
+    output: CommandOutput,
+) -> Result<(), JstError> {
+    match output {
+        CommandOutput::Stdout => write_command(io::stdout().lock(), command, color, kind),
+        CommandOutput::Stderr => write_command(io::stderr().lock(), command, color, kind),
+    }
+}
+
+fn write_command(
+    mut writer: impl Write,
+    command: &str,
+    color: bool,
+    kind: ProposalKind,
+) -> Result<(), JstError> {
     let marker = match kind {
         ProposalKind::Initial => None,
         ProposalKind::Revised => Some(("✦ AI revision", "33")),
@@ -449,17 +489,19 @@ fn print_command(command: &str, color: bool, kind: ProposalKind) -> Result<(), J
     };
     if let Some((label, ansi)) = marker {
         if color {
-            println!("\x1b[1;{ansi}m{label}\x1b[0m");
+            writeln!(writer, "\x1b[1;{ansi}m{label}\x1b[0m")
+                .map_err(|error| JstError::Other(format!("{error}")))?;
         } else {
-            println!("{label}");
+            writeln!(writer, "{label}").map_err(|error| JstError::Other(format!("{error}")))?;
         }
     }
     if color {
-        println!("\x1b[1;36m→\x1b[0m \x1b[1m{command}\x1b[0m");
+        writeln!(writer, "\x1b[1;36m→\x1b[0m \x1b[1m{command}\x1b[0m")
+            .map_err(|error| JstError::Other(format!("{error}")))?;
     } else {
-        println!("→ {command}");
+        writeln!(writer, "→ {command}").map_err(|error| JstError::Other(format!("{error}")))?;
     }
-    io::stdout()
+    writer
         .flush()
         .map_err(|error| JstError::Other(format!("{error}")))
 }
