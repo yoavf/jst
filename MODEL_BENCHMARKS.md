@@ -27,6 +27,8 @@ so rerun the benchmark instead of treating this table as permanent.
 
 See the [benchmark documentation](crates/server/examples/benchmark_models.md)
 for configuration, output interpretation, and the reusable manual-review prompt.
+For prompt optimization while holding Phi-4 fixed, see the
+[prompt autoresearch runner](crates/server/examples/prompt_autoresearch.md).
 For example:
 
 ```sh
