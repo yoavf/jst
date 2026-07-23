@@ -1,0 +1,58 @@
+name: PR Preview Comment
+
+on:
+  workflow_run:
+    workflows:
+      - PR Preview
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-preview-comment-${{ github.event.workflow_run.pull_requests[0].number }}
+  cancel-in-progress: true
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Post preview instructions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf -v COMMAND \
+            'preview_dir="$(mktemp -d)" && gh run download %s --repo %s --name jst-pr-preview-macos-universal --dir "$preview_dir" && chmod +x "$preview_dir/jst" && "$preview_dir/jst" --dry list files in the current directory' \
+            "$RUN_ID" "$REPOSITORY"
+          printf -v BODY '%s\n\n%s\n\n```sh\n%s\n```\n\n%s\n\n[View the preview build](https://github.com/%s/actions/runs/%s)' \
+            '<!-- jst-pr-preview -->' \
+            'The macOS CLI preview for this PR is ready. With [GitHub CLI](https://cli.github.com/) authenticated, copy this one command to download and run it:' \
+            "$COMMAND" \
+            'Replace the example arguments after `jst` to test another command. The artifact is retained for 7 days.' \
+            "$REPOSITORY" "$RUN_ID"
+
+          COMMENT_ID="$(
+            gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
+              --jq 'map(select(.user.login == "github-actions[bot]" and (.body | contains("<!-- jst-pr-preview -->"))))[0].id // empty'
+          )"
+
+          if [[ -n "$COMMENT_ID" ]]; then
+            gh api --method PATCH "repos/$REPOSITORY/issues/comments/$COMMENT_ID" \
+              -f body="$BODY" >/dev/null
+          else
+            gh api --method POST "repos/$REPOSITORY/issues/$PR_NUMBER/comments" \
+              -f body="$BODY" >/dev/null
+          fi
