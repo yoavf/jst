@@ -193,13 +193,10 @@ fn user_prompt(req: &TranslateRequest) -> String {
         return req.input.clone();
     };
 
-    serde_json::json!({
-        "task": "revise_command",
-        "original_request": req.input,
-        "current_command": revision.command,
-        "requested_change": revision.instruction,
-    })
-    .to_string()
+    format!(
+        "TASK: revise_command\nORIGINAL_REQUEST:\n{}\nCURRENT_COMMAND:\n{}\nREQUESTED_CHANGE:\n{}",
+        req.input, revision.command, revision.instruction
+    )
 }
 
 fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'static str> {
@@ -359,12 +356,11 @@ mod tests {
             }),
         };
 
-        let prompt: serde_json::Value =
-            serde_json::from_str(&user_prompt(&request)).expect("valid revision prompt");
-        assert_eq!(prompt["task"], "revise_command");
-        assert_eq!(prompt["original_request"], "show large files");
-        assert_eq!(prompt["current_command"], "du -ah . | sort -hr");
-        assert_eq!(prompt["requested_change"], "only show the first ten");
+        let prompt = user_prompt(&request);
+        assert!(prompt.starts_with("TASK: revise_command\n"));
+        assert!(prompt.contains("ORIGINAL_REQUEST:\nshow large files"));
+        assert!(prompt.contains("CURRENT_COMMAND:\ndu -ah . | sort -hr"));
+        assert!(prompt.contains("REQUESTED_CHANGE:\nonly show the first ten"));
     }
 
     #[test]
