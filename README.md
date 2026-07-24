@@ -133,7 +133,7 @@ The hosted server currently applies these safeguards:
 - 1,000 translations per anonymous installation in a fixed 30-day window.
 - 20 translations per minute per client IP at the Fly proxy.
 - 100 translations per client IP and 5,000 globally per fixed 24-hour window.
-- A 32-request concurrency cap, 512-byte prompts and revision instructions,
+- A 256-request concurrency cap, 512-byte prompts and revision instructions,
   8 KiB request bodies, bounded model outputs, and a five-second timeout for
   each primary or fallback model attempt.
 - Strict OS and shell metadata validation, with provider details hidden from
@@ -141,10 +141,13 @@ The hosted server currently applies these safeguards:
 - Rate-limit response headers for each active quota.
 
 The CLI creates a random installation ID in its config directory and sends it
-with translation requests. The server stores only an in-memory hash of that ID;
-older clients fall back to a Fly-provided IP address. This is a best-effort
-spending brake, not identity: deleting the ID bypasses it, and counters reset
-when the server restarts or is redeployed.
+with translation requests. The server stores only a hash of that ID; older
+clients fall back to a Fly-provided IP address. When
+`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, quota counters
+are atomically enforced in the shared Redis store across every server instance.
+Without Upstash, the server falls back to per-process in-memory counters that
+reset when the process restarts. This is a best-effort spending brake, not
+identity: deleting the installation ID bypasses it.
 
 You do not have to use the hosted proxy. The bundled server works with any
 OpenAI-compatible chat-completions API. For example, using OpenRouter:
@@ -175,6 +178,8 @@ anonymous usage tracking on your own server.
 daily limits. Each accepts `0` to disable it. The bundled implementation trusts
 Fly's `Fly-Client-IP` header; self-hosters should only enable IP limits behind a
 proxy that overwrites that header rather than accepting it from clients.
+Configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to share both
+rate-limit counters and aggregate usage statistics across server instances.
 `LLM_API_KEY` is optional for local APIs that do not require authentication.
 `LLM_FALLBACK_MODEL` optionally selects a model to try when `LLM_MODEL` fails.
 Alternatively, `JST_API_URL` can point directly to any service implementing

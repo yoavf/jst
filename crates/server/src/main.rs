@@ -20,8 +20,7 @@ const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
-const MONTH: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+const RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 struct AppState {
@@ -31,10 +30,7 @@ struct AppState {
     llm_model: String,
     llm_fallback_model: Option<String>,
     translation_slots: Arc<Semaphore>,
-    usage_limiter: Option<Arc<rate_limit::RateLimiter>>,
-    minute_limiter: Option<Arc<rate_limit::RateLimiter>>,
-    daily_ip_limiter: Option<Arc<rate_limit::RateLimiter>>,
-    global_daily_limiter: Option<Arc<rate_limit::RateLimiter>>,
+    rate_limits: Arc<rate_limit::RateLimits>,
     stats: Option<Arc<stats::StatsCollector>>,
 }
 
@@ -103,6 +99,16 @@ async fn main() {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("failed to build LLM client");
+    let rate_limits = Arc::new(rate_limit::RateLimits::from_env(
+        &client,
+        rate_limit::Config {
+            monthly_limit: monthly_request_limit,
+            minute_limit: requests_per_minute,
+            daily_ip_limit: daily_requests_per_ip,
+            global_daily_limit: global_daily_request_limit,
+            max_client_entries: max_tracked_installations,
+        },
+    ));
     let stats = stats::StatsCollector::from_env(&client);
     if let Some(collector) = stats.clone() {
         tokio::spawn(collector.flush_loop());
@@ -114,34 +120,7 @@ async fn main() {
         llm_model,
         llm_fallback_model,
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
-        usage_limiter: (monthly_request_limit > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                monthly_request_limit,
-                max_tracked_installations,
-                MONTH,
-            ))
-        }),
-        minute_limiter: (requests_per_minute > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                requests_per_minute,
-                max_tracked_installations,
-                Duration::from_secs(60),
-            ))
-        }),
-        daily_ip_limiter: (daily_requests_per_ip > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                daily_requests_per_ip,
-                max_tracked_installations,
-                DAY,
-            ))
-        }),
-        global_daily_limiter: (global_daily_request_limit > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                global_daily_request_limit,
-                1,
-                DAY,
-            ))
-        }),
+        rate_limits,
         stats: stats.clone(),
     };
 
@@ -251,22 +230,42 @@ async fn translate(
             .into_response();
     }
 
-    let client_limits_enabled = state.minute_limiter.is_some()
-        || state.daily_ip_limiter.is_some()
-        || state.usage_limiter.is_some();
-    let ip_limits_enabled = state.minute_limiter.is_some() || state.daily_ip_limiter.is_some();
-    let (installation_fingerprint, address_fingerprint) =
-        match request_limit_fingerprints(&headers, client_limits_enabled, ip_limits_enabled) {
-            Ok(fingerprints) => fingerprints,
-            Err(message) => return bad_request(message),
-        };
+    let (installation_fingerprint, address_fingerprint) = match request_limit_fingerprints(
+        &headers,
+        state.rate_limits.client_limits_enabled(),
+        state.rate_limits.ip_limits_enabled(),
+    ) {
+        Ok(fingerprints) => fingerprints,
+        Err(message) => return bad_request(message),
+    };
     let client_fingerprint = address_fingerprint
         .as_deref()
         .or(installation_fingerprint.as_deref())
         .unwrap_or("");
+    let decisions = match tokio::time::timeout(
+        RATE_LIMIT_TIMEOUT,
+        state
+            .rate_limits
+            .check(installation_fingerprint.as_deref(), client_fingerprint),
+    )
+    .await
+    {
+        Ok(Ok(decisions)) => decisions,
+        Ok(Err(error)) => {
+            error!("Rate-limit store error: {error}");
+            return busy_response();
+        }
+        Err(_) => {
+            error!(
+                "Rate-limit store timed out after {:.1} seconds",
+                RATE_LIMIT_TIMEOUT.as_secs_f64()
+            );
+            return busy_response();
+        }
+    };
     let mut usage = UsageHeaders::default();
 
-    match check_limit(&state.minute_limiter, client_fingerprint) {
+    match check_decision(decisions.minute) {
         Ok(value) => usage.minute = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.minute = Some((limit, 0));
@@ -276,10 +275,10 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
 
-    match check_limit(&state.daily_ip_limiter, client_fingerprint) {
+    match check_decision(decisions.daily_ip) {
         Ok(value) => usage.daily_ip = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.daily_ip = Some((limit, 0));
@@ -289,17 +288,10 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
 
-    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
-        return with_usage_headers(busy_response(), usage);
-    };
-
-    match check_limit(
-        &state.usage_limiter,
-        installation_fingerprint.as_deref().unwrap_or(""),
-    ) {
+    match check_decision(decisions.monthly) {
         Ok(value) => usage.monthly = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.monthly = Some((limit, 0));
@@ -309,10 +301,10 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
 
-    match check_limit(&state.global_daily_limiter, "global") {
+    match check_decision(decisions.global_daily) {
         Ok(value) => usage.global_daily = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.global_daily = Some((limit, 0));
@@ -322,8 +314,12 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
+
+    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
+        return with_usage_headers(busy_response(), usage);
+    };
 
     let response = match openai_compatible::translate(
         &state.client,
@@ -355,15 +351,14 @@ async fn translate(
     with_usage_headers(response, usage)
 }
 
-fn check_limit(
-    limiter: &Option<Arc<rate_limit::RateLimiter>>,
-    fingerprint: &str,
+fn check_decision(
+    decision: Option<rate_limit::Decision>,
 ) -> Result<Option<(u32, u32)>, LimitFailure> {
-    let Some(limiter) = limiter else {
+    let Some(decision) = decision else {
         return Ok(None);
     };
 
-    match limiter.check(fingerprint) {
+    match decision {
         rate_limit::Decision::Allowed { limit, remaining } => Ok(Some((limit, remaining))),
         rate_limit::Decision::Exhausted { limit } => Err(LimitFailure::Exhausted(limit)),
         rate_limit::Decision::Capacity => Err(LimitFailure::Capacity),
@@ -588,14 +583,18 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        request_fingerprint, request_limit_fingerprints, status_usage, validate_request,
-        with_usage_headers, UsageHeaders,
+        request_fingerprint, request_limit_fingerprints, status_usage, translate, validate_request,
+        with_usage_headers, AppState, UsageHeaders,
     };
     use axum::{
+        extract::State,
         http::{HeaderMap, HeaderValue, StatusCode},
         response::IntoResponse,
+        Json,
     };
     use jst_shared::TranslateRequest;
+    use std::{sync::Arc, time::Duration};
+    use tokio::sync::Semaphore;
 
     fn request(input: &str) -> TranslateRequest {
         TranslateRequest {
@@ -710,6 +709,129 @@ mod tests {
         assert_eq!(headers["x-ratelimit-daily-ip-remaining"], "99");
         assert_eq!(headers["x-ratelimit-global-daily-limit"], "5000");
         assert_eq!(headers["x-ratelimit-global-daily-remaining"], "4999");
+    }
+
+    #[tokio::test]
+    async fn busy_response_preserves_usage_headers() {
+        let client = reqwest::Client::new();
+        let state = AppState {
+            client: client.clone(),
+            llm_api_url: "http://unused.invalid".to_string(),
+            llm_api_key: String::new(),
+            llm_model: "unused".to_string(),
+            llm_fallback_model: None,
+            translation_slots: Arc::new(Semaphore::new(0)),
+            rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 1_000,
+                    minute_limit: 20,
+                    daily_ip_limit: 100,
+                    global_daily_limit: 5_000,
+                    max_client_entries: 100,
+                },
+            )),
+            stats: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-jst-installation-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        headers.insert("fly-client-ip", HeaderValue::from_static("192.0.2.1"));
+
+        let response = translate(State(state), headers, Json(request("pwd")))
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["x-ratelimit-limit"], "1000");
+        assert_eq!(response.headers()["x-ratelimit-remaining"], "999");
+        assert_eq!(response.headers()["x-ratelimit-minute-limit"], "20");
+        assert_eq!(response.headers()["x-ratelimit-minute-remaining"], "19");
+        assert_eq!(response.headers()["x-ratelimit-daily-ip-limit"], "100");
+        assert_eq!(response.headers()["x-ratelimit-daily-ip-remaining"], "99");
+        assert_eq!(response.headers()["x-ratelimit-global-daily-limit"], "5000");
+        assert_eq!(
+            response.headers()["x-ratelimit-global-daily-remaining"],
+            "4999"
+        );
+    }
+
+    #[tokio::test]
+    async fn slow_rate_limit_store_does_not_hold_translation_slot() {
+        let received = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let mock = axum::Router::new().route(
+            "/",
+            axum::routing::post({
+                let received = received.clone();
+                let release = release.clone();
+                move || {
+                    let received = received.clone();
+                    let release = release.clone();
+                    async move {
+                        received.notify_one();
+                        release.notified().await;
+                        Json(serde_json::json!({
+                            "result": [[1, 1], [1, 1], [1, 1], [1, 1]]
+                        }))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let slots = Arc::new(Semaphore::new(1));
+        let state = AppState {
+            client: client.clone(),
+            llm_api_url: "http://127.0.0.1:9".to_string(),
+            llm_api_key: String::new(),
+            llm_model: "unused".to_string(),
+            llm_fallback_model: None,
+            translation_slots: slots.clone(),
+            rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_upstash(
+                &client,
+                format!("http://{address}"),
+                "test-token".to_string(),
+                super::rate_limit::Config {
+                    monthly_limit: 1_000,
+                    minute_limit: 20,
+                    daily_ip_limit: 100,
+                    global_daily_limit: 5_000,
+                    max_client_entries: 100,
+                },
+            )),
+            stats: None,
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-jst-installation-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        headers.insert("fly-client-ip", HeaderValue::from_static("192.0.2.1"));
+        let request = tokio::spawn(async move {
+            translate(State(state), headers, Json(request("pwd")))
+                .await
+                .into_response()
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), received.notified())
+            .await
+            .expect("rate-limit request should reach mock Upstash");
+        assert_eq!(
+            slots.available_permits(),
+            1,
+            "rate-limit latency must not consume a translation slot"
+        );
+
+        release.notify_one();
+        let _ = request.await.unwrap();
     }
 
     #[test]
