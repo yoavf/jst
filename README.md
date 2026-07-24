@@ -133,7 +133,7 @@ The hosted server currently applies these safeguards:
 - 1,000 translations per anonymous installation in a fixed 30-day window.
 - 20 translations per minute per client IP at the Fly proxy.
 - 100 translations per client IP and 5,000 globally per fixed 24-hour window.
-- A 32-request concurrency cap, 512-byte prompts and revision instructions,
+- A 256-request concurrency cap, 512-byte prompts and revision instructions,
   8 KiB request bodies, bounded model outputs, and a five-second timeout for
   each primary or fallback model attempt.
 - Strict OS and shell metadata validation, with provider details hidden from
