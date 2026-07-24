@@ -20,6 +20,7 @@ const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
+const RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 struct AppState {
@@ -241,17 +242,24 @@ async fn translate(
         .as_deref()
         .or(installation_fingerprint.as_deref())
         .unwrap_or("");
-    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
-        return busy_response();
-    };
-    let decisions = match state
-        .rate_limits
-        .check(installation_fingerprint.as_deref(), client_fingerprint)
-        .await
+    let decisions = match tokio::time::timeout(
+        RATE_LIMIT_TIMEOUT,
+        state
+            .rate_limits
+            .check(installation_fingerprint.as_deref(), client_fingerprint),
+    )
+    .await
     {
-        Ok(decisions) => decisions,
-        Err(error) => {
+        Ok(Ok(decisions)) => decisions,
+        Ok(Err(error)) => {
             error!("Rate-limit store error: {error}");
+            return busy_response();
+        }
+        Err(_) => {
+            error!(
+                "Rate-limit store timed out after {:.1} seconds",
+                RATE_LIMIT_TIMEOUT.as_secs_f64()
+            );
             return busy_response();
         }
     };
@@ -267,7 +275,7 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
 
     match check_decision(decisions.daily_ip) {
@@ -280,7 +288,7 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
 
     match check_decision(decisions.monthly) {
@@ -293,7 +301,7 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
 
     match check_decision(decisions.global_daily) {
@@ -306,8 +314,12 @@ async fn translate(
                 usage,
             );
         }
-        Err(LimitFailure::Capacity) => return busy_response(),
+        Err(LimitFailure::Capacity) => return with_usage_headers(busy_response(), usage),
     }
+
+    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
+        return with_usage_headers(busy_response(), usage);
+    };
 
     let response = match openai_compatible::translate(
         &state.client,
@@ -571,14 +583,18 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        request_fingerprint, request_limit_fingerprints, status_usage, validate_request,
-        with_usage_headers, UsageHeaders,
+        request_fingerprint, request_limit_fingerprints, status_usage, translate, validate_request,
+        with_usage_headers, AppState, UsageHeaders,
     };
     use axum::{
+        extract::State,
         http::{HeaderMap, HeaderValue, StatusCode},
         response::IntoResponse,
+        Json,
     };
     use jst_shared::TranslateRequest;
+    use std::{sync::Arc, time::Duration};
+    use tokio::sync::Semaphore;
 
     fn request(input: &str) -> TranslateRequest {
         TranslateRequest {
@@ -693,6 +709,129 @@ mod tests {
         assert_eq!(headers["x-ratelimit-daily-ip-remaining"], "99");
         assert_eq!(headers["x-ratelimit-global-daily-limit"], "5000");
         assert_eq!(headers["x-ratelimit-global-daily-remaining"], "4999");
+    }
+
+    #[tokio::test]
+    async fn busy_response_preserves_usage_headers() {
+        let client = reqwest::Client::new();
+        let state = AppState {
+            client: client.clone(),
+            llm_api_url: "http://unused.invalid".to_string(),
+            llm_api_key: String::new(),
+            llm_model: "unused".to_string(),
+            llm_fallback_model: None,
+            translation_slots: Arc::new(Semaphore::new(0)),
+            rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 1_000,
+                    minute_limit: 20,
+                    daily_ip_limit: 100,
+                    global_daily_limit: 5_000,
+                    max_client_entries: 100,
+                },
+            )),
+            stats: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-jst-installation-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        headers.insert("fly-client-ip", HeaderValue::from_static("192.0.2.1"));
+
+        let response = translate(State(state), headers, Json(request("pwd")))
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["x-ratelimit-limit"], "1000");
+        assert_eq!(response.headers()["x-ratelimit-remaining"], "999");
+        assert_eq!(response.headers()["x-ratelimit-minute-limit"], "20");
+        assert_eq!(response.headers()["x-ratelimit-minute-remaining"], "19");
+        assert_eq!(response.headers()["x-ratelimit-daily-ip-limit"], "100");
+        assert_eq!(response.headers()["x-ratelimit-daily-ip-remaining"], "99");
+        assert_eq!(response.headers()["x-ratelimit-global-daily-limit"], "5000");
+        assert_eq!(
+            response.headers()["x-ratelimit-global-daily-remaining"],
+            "4999"
+        );
+    }
+
+    #[tokio::test]
+    async fn slow_rate_limit_store_does_not_hold_translation_slot() {
+        let received = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let mock = axum::Router::new().route(
+            "/",
+            axum::routing::post({
+                let received = received.clone();
+                let release = release.clone();
+                move || {
+                    let received = received.clone();
+                    let release = release.clone();
+                    async move {
+                        received.notify_one();
+                        release.notified().await;
+                        Json(serde_json::json!({
+                            "result": [[1, 1], [1, 1], [1, 1], [1, 1]]
+                        }))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let slots = Arc::new(Semaphore::new(1));
+        let state = AppState {
+            client: client.clone(),
+            llm_api_url: "http://127.0.0.1:9".to_string(),
+            llm_api_key: String::new(),
+            llm_model: "unused".to_string(),
+            llm_fallback_model: None,
+            translation_slots: slots.clone(),
+            rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_upstash(
+                &client,
+                format!("http://{address}"),
+                "test-token".to_string(),
+                super::rate_limit::Config {
+                    monthly_limit: 1_000,
+                    minute_limit: 20,
+                    daily_ip_limit: 100,
+                    global_daily_limit: 5_000,
+                    max_client_entries: 100,
+                },
+            )),
+            stats: None,
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-jst-installation-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        headers.insert("fly-client-ip", HeaderValue::from_static("192.0.2.1"));
+        let request = tokio::spawn(async move {
+            translate(State(state), headers, Json(request("pwd")))
+                .await
+                .into_response()
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), received.notified())
+            .await
+            .expect("rate-limit request should reach mock Upstash");
+        assert_eq!(
+            slots.available_permits(),
+            1,
+            "rate-limit latency must not consume a translation slot"
+        );
+
+        release.notify_one();
+        let _ = request.await.unwrap();
     }
 
     #[test]

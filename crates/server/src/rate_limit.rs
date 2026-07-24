@@ -166,6 +166,32 @@ impl RateLimits {
         Self { config, backend }
     }
 
+    #[cfg(test)]
+    pub fn for_test_local(config: Config) -> Self {
+        let config = LimitConfig::new(config);
+        Self {
+            config,
+            backend: Backend::Local(Box::new(LocalLimits::new(config))),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn for_test_upstash(
+        client: &reqwest::Client,
+        url: String,
+        token: String,
+        config: Config,
+    ) -> Self {
+        Self {
+            config: LimitConfig::new(config),
+            backend: Backend::Upstash(UpstashLimits {
+                client: client.clone(),
+                url,
+                token,
+            }),
+        }
+    }
+
     pub fn client_limits_enabled(&self) -> bool {
         self.config.minute.is_some()
             || self.config.daily_ip.is_some()
