@@ -9,6 +9,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
+sha2 = "0.10"
 axum = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

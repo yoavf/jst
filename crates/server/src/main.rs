@@ -20,8 +20,6 @@ const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
-const MONTH: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 #[derive(Clone)]
 struct AppState {
@@ -31,10 +29,7 @@ struct AppState {
     llm_model: String,
     llm_fallback_model: Option<String>,
     translation_slots: Arc<Semaphore>,
-    usage_limiter: Option<Arc<rate_limit::RateLimiter>>,
-    minute_limiter: Option<Arc<rate_limit::RateLimiter>>,
-    daily_ip_limiter: Option<Arc<rate_limit::RateLimiter>>,
-    global_daily_limiter: Option<Arc<rate_limit::RateLimiter>>,
+    rate_limits: Arc<rate_limit::RateLimits>,
     stats: Option<Arc<stats::StatsCollector>>,
 }
 
@@ -103,6 +98,16 @@ async fn main() {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("failed to build LLM client");
+    let rate_limits = Arc::new(rate_limit::RateLimits::from_env(
+        &client,
+        rate_limit::Config {
+            monthly_limit: monthly_request_limit,
+            minute_limit: requests_per_minute,
+            daily_ip_limit: daily_requests_per_ip,
+            global_daily_limit: global_daily_request_limit,
+            max_client_entries: max_tracked_installations,
+        },
+    ));
     let stats = stats::StatsCollector::from_env(&client);
     if let Some(collector) = stats.clone() {
         tokio::spawn(collector.flush_loop());
@@ -114,34 +119,7 @@ async fn main() {
         llm_model,
         llm_fallback_model,
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
-        usage_limiter: (monthly_request_limit > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                monthly_request_limit,
-                max_tracked_installations,
-                MONTH,
-            ))
-        }),
-        minute_limiter: (requests_per_minute > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                requests_per_minute,
-                max_tracked_installations,
-                Duration::from_secs(60),
-            ))
-        }),
-        daily_ip_limiter: (daily_requests_per_ip > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                daily_requests_per_ip,
-                max_tracked_installations,
-                DAY,
-            ))
-        }),
-        global_daily_limiter: (global_daily_request_limit > 0).then(|| {
-            Arc::new(rate_limit::RateLimiter::new(
-                global_daily_request_limit,
-                1,
-                DAY,
-            ))
-        }),
+        rate_limits,
         stats: stats.clone(),
     };
 
@@ -251,22 +229,35 @@ async fn translate(
             .into_response();
     }
 
-    let client_limits_enabled = state.minute_limiter.is_some()
-        || state.daily_ip_limiter.is_some()
-        || state.usage_limiter.is_some();
-    let ip_limits_enabled = state.minute_limiter.is_some() || state.daily_ip_limiter.is_some();
-    let (installation_fingerprint, address_fingerprint) =
-        match request_limit_fingerprints(&headers, client_limits_enabled, ip_limits_enabled) {
-            Ok(fingerprints) => fingerprints,
-            Err(message) => return bad_request(message),
-        };
+    let (installation_fingerprint, address_fingerprint) = match request_limit_fingerprints(
+        &headers,
+        state.rate_limits.client_limits_enabled(),
+        state.rate_limits.ip_limits_enabled(),
+    ) {
+        Ok(fingerprints) => fingerprints,
+        Err(message) => return bad_request(message),
+    };
     let client_fingerprint = address_fingerprint
         .as_deref()
         .or(installation_fingerprint.as_deref())
         .unwrap_or("");
+    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
+        return busy_response();
+    };
+    let decisions = match state
+        .rate_limits
+        .check(installation_fingerprint.as_deref(), client_fingerprint)
+        .await
+    {
+        Ok(decisions) => decisions,
+        Err(error) => {
+            error!("Rate-limit store error: {error}");
+            return busy_response();
+        }
+    };
     let mut usage = UsageHeaders::default();
 
-    match check_limit(&state.minute_limiter, client_fingerprint) {
+    match check_decision(decisions.minute) {
         Ok(value) => usage.minute = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.minute = Some((limit, 0));
@@ -279,7 +270,7 @@ async fn translate(
         Err(LimitFailure::Capacity) => return busy_response(),
     }
 
-    match check_limit(&state.daily_ip_limiter, client_fingerprint) {
+    match check_decision(decisions.daily_ip) {
         Ok(value) => usage.daily_ip = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.daily_ip = Some((limit, 0));
@@ -292,14 +283,7 @@ async fn translate(
         Err(LimitFailure::Capacity) => return busy_response(),
     }
 
-    let Ok(_permit) = state.translation_slots.clone().try_acquire_owned() else {
-        return with_usage_headers(busy_response(), usage);
-    };
-
-    match check_limit(
-        &state.usage_limiter,
-        installation_fingerprint.as_deref().unwrap_or(""),
-    ) {
+    match check_decision(decisions.monthly) {
         Ok(value) => usage.monthly = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.monthly = Some((limit, 0));
@@ -312,7 +296,7 @@ async fn translate(
         Err(LimitFailure::Capacity) => return busy_response(),
     }
 
-    match check_limit(&state.global_daily_limiter, "global") {
+    match check_decision(decisions.global_daily) {
         Ok(value) => usage.global_daily = value,
         Err(LimitFailure::Exhausted(limit)) => {
             usage.global_daily = Some((limit, 0));
@@ -355,15 +339,14 @@ async fn translate(
     with_usage_headers(response, usage)
 }
 
-fn check_limit(
-    limiter: &Option<Arc<rate_limit::RateLimiter>>,
-    fingerprint: &str,
+fn check_decision(
+    decision: Option<rate_limit::Decision>,
 ) -> Result<Option<(u32, u32)>, LimitFailure> {
-    let Some(limiter) = limiter else {
+    let Some(decision) = decision else {
         return Ok(None);
     };
 
-    match limiter.check(fingerprint) {
+    match decision {
         rate_limit::Decision::Allowed { limit, remaining } => Ok(Some((limit, remaining))),
         rate_limit::Decision::Exhausted { limit } => Err(LimitFailure::Exhausted(limit)),
         rate_limit::Decision::Capacity => Err(LimitFailure::Capacity),
