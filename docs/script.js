@@ -6,6 +6,21 @@ const examples = [
   {
     requestParts: [
       { text: "jst " },
+      { text: "generate a", map: "action" },
+      { text: " 32 character long", map: "length" },
+      { text: " secret", map: "kind" },
+    ],
+    resultParts: [
+      { text: "openssl rand", map: "action" },
+      { text: " -base64 24", map: "kind" },
+      { text: " | tr -d '='", map: "length" },
+      { text: " | cut -c1-32", map: "length" },
+    ],
+    mapOrder: ["action", "length", "kind"],
+  },
+  {
+    requestParts: [
+      { text: "jst " },
       { text: "turn every png", map: "source" },
       { text: " in screenshots", map: "place" },
       { text: " into a webp", map: "format" },
@@ -18,21 +33,6 @@ const examples = [
       { text: "; done", map: "source" },
     ],
     mapOrder: ["source", "place", "format"],
-  },
-  {
-    requestParts: [
-      { text: "jst " },
-      { text: "generate a", map: "action" },
-      { text: " 32 character long", map: "length" },
-      { text: " secret", map: "kind" },
-    ],
-    resultParts: [
-      { text: "openssl rand", map: "action" },
-      { text: " -base64 24", map: "kind" },
-      { text: " | tr -d '='", map: "length" },
-      { text: " | cut -c1-32", map: "length" },
-    ],
-    mapOrder: ["action", "length", "kind"],
   },
   {
     requestParts: [

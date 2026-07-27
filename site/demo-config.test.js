@@ -63,8 +63,8 @@ test("leads with the most interesting examples and omits the expenses search", (
   const rustSearch = pageScript.indexOf("find all rust files");
   const largestFiles = pageScript.indexOf("show the 10");
 
-  assert.ok(imageConversion < secretGeneration);
-  assert.ok(secretGeneration < processSorting);
+  assert.ok(secretGeneration < imageConversion);
+  assert.ok(imageConversion < processSorting);
   assert.ok(processSorting < folderSizing);
   assert.ok(folderSizing < rustSearch);
   assert.ok(rustSearch < largestFiles);
