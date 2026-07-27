@@ -580,16 +580,10 @@ function appendDemoEntry(input) {
 }
 
 function reportSandboxProgress(stage) {
-  const message =
-    stage === "ready" && translationElement.classList.contains("is-interactive")
-      ? "session ready"
-      : SANDBOX_PROGRESS[stage];
+  if (!translationElement.classList.contains("is-interactive")) return;
+  const message = stage === "ready" ? "session ready" : SANDBOX_PROGRESS[stage];
   if (!message) return;
   demoStatus.textContent = message;
-  if (!translationElement.classList.contains("is-interactive")) {
-    tryDemoLabel.textContent =
-      stage === "runtime" ? "loading runtime" : "starting sandbox";
-  }
 }
 
 function openDemoDialog() {
@@ -654,10 +648,13 @@ async function activateDemo() {
   stopSpinner();
   translationElement.classList.remove("is-loading");
   translationElement.classList.add("is-activating");
-  translationElement.setAttribute("aria-label", "Interactive JST browser demo");
+  translationElement.setAttribute("aria-label", "Starting the JST browser sandbox");
+  requestElement.textContent = "starting sandbox…";
+  cursorElement.classList.remove("is-hidden");
+  resultLine.classList.remove("is-visible");
+  resultElement.textContent = "";
   tryDemoButton.disabled = true;
-  tryDemoLabel.textContent = "starting sandbox";
-  demoStatus.textContent = "booting a disposable WASI toolbox in your browser…";
+  demoStatus.textContent = "";
 
   try {
     if (!window.crossOriginIsolated) {
@@ -678,6 +675,7 @@ async function activateDemo() {
     resultLine.removeAttribute("aria-hidden");
     resultElement.textContent = "";
     demoSession.hidden = false;
+    translationElement.setAttribute("aria-label", "Interactive JST browser demo");
     terminalTitle.textContent = "guest@jst: ~/playground";
     terminalRuntime.hidden = true;
     terminalSessionActions.hidden = false;
@@ -690,10 +688,13 @@ async function activateDemo() {
     if (activationRun !== demoActivationRun) return;
     demoRuntime?.destroy();
     demoRuntime = null;
+    const message =
+      error instanceof Error ? error.message : "The browser sandbox could not start.";
+    requestElement.textContent = message;
+    cursorElement.classList.add("is-hidden");
+    translationElement.setAttribute("aria-label", message);
     tryDemoButton.disabled = false;
     tryDemoLabel.textContent = "try again";
-    demoStatus.textContent =
-      error instanceof Error ? error.message : "The browser sandbox could not start.";
   } finally {
     translationElement.classList.remove("is-activating");
   }

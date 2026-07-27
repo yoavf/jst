@@ -622,6 +622,23 @@ h1 {
   animation: arrow-spin 720ms linear infinite;
 }
 
+.translation.is-activating .try-demo,
+.translation.is-activating .another-example,
+.translation.is-activating .terminal-line--result {
+  display: none;
+}
+
+.demo-dialog .translation.is-activating {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 3.75rem;
+}
+
+.translation.is-activating .demo-example-request {
+  justify-content: center;
+}
+
 @keyframes arrow-spin {
   to {
     transform: rotate(360deg);
