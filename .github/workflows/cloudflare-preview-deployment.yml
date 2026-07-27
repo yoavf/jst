@@ -1,0 +1,153 @@
+name: Surface Cloudflare Pages preview
+
+on:
+  check_run:
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      check_run_id:
+        description: Successful Cloudflare Pages check run to surface
+        required: true
+        type: number
+
+permissions:
+  checks: read
+  contents: read
+  deployments: write
+
+jobs:
+  surface:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.check_run.name == 'Cloudflare Pages' &&
+        github.event.check_run.app.slug == 'cloudflare-workers-and-pages' &&
+        github.event.check_run.conclusion == 'success'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Attach preview URL to a GitHub Deployment
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const checkRun = context.eventName === "workflow_dispatch"
+              ? (await github.rest.checks.get({
+                  owner,
+                  repo,
+                  check_run_id: Number(context.payload.inputs.check_run_id),
+                })).data
+              : context.payload.check_run;
+
+            if (
+              checkRun.name !== "Cloudflare Pages" ||
+              checkRun.app?.slug !== "cloudflare-workers-and-pages" ||
+              checkRun.conclusion !== "success"
+            ) {
+              core.setFailed("The supplied check run is not a successful Cloudflare Pages check.");
+              return;
+            }
+
+            const summary = checkRun.output?.summary || "";
+            const previewMatch = summary.match(
+              /<strong>\s*Preview URL:\s*<\/strong>[\s\S]*?href=['"]([^'"]+)['"]/i,
+            );
+            const branchMatch = summary.match(
+              /<strong>\s*Branch Preview URL:\s*<\/strong>[\s\S]*?href=['"]([^'"]+)['"]/i,
+            );
+            if (!previewMatch) {
+              core.setFailed("Cloudflare's check did not include a preview URL.");
+              return;
+            }
+
+            function pagesUrl(value) {
+              const url = new URL(value);
+              if (url.protocol !== "https:" || !url.hostname.endsWith(".pages.dev")) {
+                throw new Error(`Refusing unexpected Cloudflare preview URL: ${value}`);
+              }
+              return url.toString();
+            }
+
+            const previewUrl = pagesUrl(previewMatch[1]);
+            const branchPreviewUrl = branchMatch ? pagesUrl(branchMatch[1]) : null;
+            const repositoryId = context.payload.repository.id;
+            const pullRequests = (checkRun.pull_requests || []).filter(
+              (pullRequest) => pullRequest.base?.repo?.id === repositoryId,
+            );
+            if (pullRequests.length === 0) {
+              core.notice("The Cloudflare deployment is not associated with a pull request.");
+              return;
+            }
+
+            for (const pullRequest of pullRequests) {
+              const environment = `cloudflare-pages-pr-${pullRequest.number}`;
+              const deployments = await github.paginate(
+                github.rest.repos.listDeployments,
+                {
+                  owner,
+                  repo,
+                  ref: checkRun.head_sha,
+                  environment,
+                  per_page: 100,
+                },
+              );
+              let deployment = deployments.find(
+                (candidate) =>
+                  candidate.sha === checkRun.head_sha &&
+                  candidate.environment === environment,
+              );
+
+              if (!deployment) {
+                deployment = (await github.rest.repos.createDeployment({
+                  owner,
+                  repo,
+                  ref: checkRun.head_sha,
+                  task: "deploy",
+                  auto_merge: false,
+                  required_contexts: [],
+                  environment,
+                  description: `Cloudflare Pages preview for PR #${pullRequest.number}`,
+                  transient_environment: true,
+                  production_environment: false,
+                  payload: {
+                    cloudflare_pages_check_id: checkRun.id,
+                    pull_request: pullRequest.number,
+                    branch_preview_url: branchPreviewUrl,
+                  },
+                })).data;
+              }
+
+              const statuses = await github.paginate(
+                github.rest.repos.listDeploymentStatuses,
+                {
+                  owner,
+                  repo,
+                  deployment_id: deployment.id,
+                  per_page: 100,
+                },
+              );
+              const alreadySurfaced = statuses.some(
+                (status) =>
+                  status.state === "success" &&
+                  status.environment_url === previewUrl,
+              );
+              if (alreadySurfaced) {
+                core.info(`PR #${pullRequest.number} already links to ${previewUrl}`);
+                continue;
+              }
+
+              await github.rest.repos.createDeploymentStatus({
+                owner,
+                repo,
+                deployment_id: deployment.id,
+                state: "success",
+                description: "Cloudflare Pages preview is ready",
+                environment,
+                environment_url: previewUrl,
+                log_url: checkRun.details_url,
+                auto_inactive: true,
+              });
+              core.info(`Surfaced PR #${pullRequest.number} preview: ${previewUrl}`);
+            }
