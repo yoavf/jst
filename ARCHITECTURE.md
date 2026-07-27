@@ -49,9 +49,11 @@ local destructive-command denylist return to the approval loop with a warning.
 `--dry` does not enter this loop; it prints the initial translation and exits
 before warnings, confirmation, or execution.
 
-The server crate is the production proxy: it owns provider credentials,
-validates and bounds requests and responses, limits concurrent provider calls,
-reuses upstream connections, and returns no provider error details to clients.
+The server crate is the production proxy: it owns separate provider credentials
+for CLI and browser-demo traffic, validates and bounds requests and responses,
+limits concurrent provider calls, reuses upstream connections, and returns no
+provider error details to clients. The demo credential never falls back to the
+CLI credential, so either surface can be measured or disabled independently.
 Fly keeps one machine warm to avoid cold-start latency and deploys only after
 CI passes.
 
@@ -103,7 +105,7 @@ crates/shared/src/prompt.rs  model instructions and output schema
 ```sh
 cargo test --workspace
 cargo build --workspace
-LLM_API_URL=... LLM_API_KEY=... LLM_MODEL=... cargo run -p jst-server
+LLM_API_URL=... LLM_API_KEY=... DEMO_LLM_API_KEY=... LLM_MODEL=... cargo run -p jst-server
 JST_API_URL=http://localhost:8080/translate cargo run -p jst-cli -- pwd
 ```
 
