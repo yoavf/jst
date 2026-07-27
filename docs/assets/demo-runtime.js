@@ -27,7 +27,10 @@ var e = class {
 		if (await this.boot(), !this.frame?.contentWindow) throw Error("The sandbox is not available.");
 		return new Promise((t, n) => {
 			let r = 0, i = window.setTimeout(() => {
-				this.destroy(), n(/* @__PURE__ */ Error("The command used too much time, so the sandbox was reset."));
+				this.frame?.contentWindow?.postMessage({
+					type: "destroy",
+					channel: this.channel
+				}, location.origin), this.destroy(), n(/* @__PURE__ */ Error("The command used too much time, so the sandbox was reset."));
 			}, 6e3), a = (e, t, { reset: n = !1 } = {}) => {
 				window.clearTimeout(i), this.messageHandler && window.removeEventListener("message", this.messageHandler), this.messageHandler = null, this.runReject = null, n && this.destroy(), e(t);
 			};

@@ -75,6 +75,10 @@ export class DemoRuntime {
     return new Promise((resolve, reject) => {
       let outputBytes = 0;
       const timeout = window.setTimeout(() => {
+        this.frame?.contentWindow?.postMessage(
+          { type: "destroy", channel: this.channel },
+          location.origin,
+        );
         this.destroy();
         reject(new Error("The command used too much time, so the sandbox was reset."));
       }, RUN_TIMEOUT_MS);

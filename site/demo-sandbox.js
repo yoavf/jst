@@ -18,6 +18,7 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "./demo-filesystem.js";
+import { BoundedOpenFile, OutputBudget } from "./demo-output.js";
 
 // The execution design is adapted from the MIT-licensed uutils browser
 // playground. Pinned source revisions and checksums live beside the binaries
@@ -26,7 +27,9 @@ import {
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const channel = new URL(location.href).hash.slice(1);
+const isWorker =
+  typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+const channel = isWorker ? null : new URL(location.href).hash.slice(1);
 const moduleUrls = {
   coreutils: "/assets/uutils/uutils.wasm?v=c868c992",
   column: "/assets/uutils/column.wasm?v=d4ed168b",
@@ -39,7 +42,11 @@ let modules;
 let workspace;
 
 function post(message) {
-  parent.postMessage({ ...message, channel }, location.origin);
+  if (isWorker) {
+    self.postMessage(message);
+  } else {
+    parent.postMessage({ ...message, channel }, location.origin);
+  }
 }
 
 function progress(stage) {
@@ -206,18 +213,28 @@ function concatBytes(chunks) {
   return decoder.decode(output);
 }
 
-async function runWasi(module, argv, stdin, stdoutIsTerminal = true) {
+async function runWasi(
+  module,
+  argv,
+  stdin,
+  outputBudget,
+  stdoutIsTerminal = true,
+) {
   const stdoutChunks = [];
   const stderrChunks = [];
   const stdoutFile = new File(new Uint8Array());
+  const capture = (chunks) => (bytes) => {
+    outputBudget.consume(bytes.byteLength);
+    chunks.push(new Uint8Array(bytes));
+  };
   const fds = [
     new OpenFile(new File(encoder.encode(stdin), { readonly: true })),
     // A real shell exposes non-final pipeline stdout as a non-TTY. Utilities
     // such as `ls` use that distinction to switch from columns to one item per line.
     stdoutIsTerminal
-      ? new ConsoleStdout((bytes) => stdoutChunks.push(new Uint8Array(bytes)))
-      : new OpenFile(stdoutFile),
-    new ConsoleStdout((bytes) => stderrChunks.push(new Uint8Array(bytes))),
+      ? new ConsoleStdout(capture(stdoutChunks))
+      : new BoundedOpenFile(stdoutFile, outputBudget),
+    new ConsoleStdout(capture(stderrChunks)),
     workspace,
   ];
   const environment = ["LANG=C.UTF-8", "LC_ALL=C.UTF-8", "NO_COLOR=1", "TERM=dumb"];
@@ -295,6 +312,7 @@ async function run(command) {
   let code = 0;
   let outputPath = null;
   let redirectedStdout = "";
+  const outputBudget = new OutputBudget(MAX_OUTPUT_BYTES);
   for (const [index, segment] of pipeline.entries()) {
     const { args, globIndexes, inputPath, name } = segment;
     if (inputPath) stdin = readWorkspaceFile(workspace, inputPath);
@@ -310,6 +328,7 @@ async function run(command) {
       modules[moduleName],
       argv,
       stdin,
+      outputBudget,
       index === pipeline.length - 1 && !segment.outputPath,
     );
     code = output.code;
@@ -329,16 +348,8 @@ async function run(command) {
   return { code, outputPath, redirectedStdout, stderr, stdout: stdin };
 }
 
-window.addEventListener("message", async (event) => {
-  if (
-    event.source !== parent ||
-    event.origin !== location.origin ||
-    event.data?.channel !== channel
-  ) {
-    return;
-  }
-
-  if (event.data?.type === "boot") {
+async function handleWorkerMessage(message) {
+  if (message?.type === "boot") {
     try {
       await boot();
       post({ type: "ready" });
@@ -348,9 +359,9 @@ window.addEventListener("message", async (event) => {
         message: error instanceof Error ? error.message : "The sandbox failed to start.",
       });
     }
-  } else if (event.data?.type === "run") {
+  } else if (message?.type === "run") {
     try {
-      const output = await run(event.data.command);
+      const output = await run(message.command);
       post({
         type: "output",
         code: output.code,
@@ -366,6 +377,51 @@ window.addEventListener("message", async (event) => {
       });
     }
   }
-});
+}
 
-post({ type: "loaded" });
+if (isWorker) {
+  self.addEventListener("message", (event) => {
+    void handleWorkerMessage(event.data);
+  });
+} else {
+  let worker = null;
+  let workerReady = false;
+
+  window.addEventListener("message", (event) => {
+    if (
+      event.source !== parent ||
+      event.origin !== location.origin ||
+      event.data?.channel !== channel
+    ) {
+      return;
+    }
+
+    if (event.data?.type === "boot") {
+      worker = new Worker("/assets/demo-sandbox.js?v=12", { type: "module" });
+      worker.addEventListener("message", (workerEvent) => {
+        if (workerEvent.data?.type === "ready") workerReady = true;
+        post(workerEvent.data);
+      });
+      worker.addEventListener("error", () => {
+        post({
+          type: workerReady ? "run-error" : "boot-error",
+          message: workerReady
+            ? "The command failed."
+            : "The sandbox failed to start.",
+        });
+      });
+      worker.postMessage({ type: "boot" });
+    } else if (event.data?.type === "run") {
+      if (worker) {
+        worker.postMessage({ command: event.data.command, type: "run" });
+      } else {
+        post({ type: "run-error", message: "The sandbox is not available." });
+      }
+    } else if (event.data?.type === "destroy") {
+      worker?.terminate();
+      worker = null;
+    }
+  });
+
+  post({ type: "loaded" });
+}
