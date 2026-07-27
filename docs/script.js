@@ -43,8 +43,8 @@ const examples = [
     ],
     resultParts: [
       { text: "ps aux", map: "target" },
-      { text: " --sort=-%mem", map: "sort" },
-      { text: " | head -n 6", map: "limit" },
+      { text: " | sort -nrk 4", map: "sort" },
+      { text: " | head -n 5", map: "limit" },
     ],
     mapOrder: ["limit", "target", "sort"],
   },
@@ -56,8 +56,8 @@ const examples = [
       { text: " taking the most space", map: "sort" },
     ],
     resultParts: [
-      { text: "du -h --max-depth=1", map: "target" },
-      { text: " | sort -hr", map: "sort" },
+      { text: "du -sk ./*/", map: "target" },
+      { text: " | sort -nr", map: "sort" },
       { text: " | head -n 10", map: "limit" },
     ],
     mapOrder: ["limit", "target", "sort"],
@@ -97,7 +97,7 @@ const examples = [
       { text: " the README", map: "file" },
     ],
     resultParts: [
-      { text: "sha256sum", map: "action" },
+      { text: "openssl dgst -sha256", map: "action" },
       { text: " README.md", map: "file" },
     ],
     mapOrder: ["action", "file"],
