@@ -1200,6 +1200,10 @@ h1 {
   transform: none;
 }
 
+.demo-dialog .another-example {
+  display: none;
+}
+
 .demo-dialog .translation.is-interactive {
   display: flex;
   min-height: 0;

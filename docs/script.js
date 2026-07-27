@@ -657,9 +657,6 @@ async function activateDemo() {
   demoStatus.textContent = "";
 
   try {
-    if (!window.crossOriginIsolated) {
-      throw new Error("The sandbox is waiting for the site’s new security headers.");
-    }
     const { DemoRuntime } = await import("./assets/demo-runtime.js?v=2");
     demoRuntime?.destroy();
     demoRuntime = new DemoRuntime({ onProgress: reportSandboxProgress });
