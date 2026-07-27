@@ -83,12 +83,23 @@ jobs:
 
             for (const pullRequest of pullRequests) {
               const environment = `cloudflare-pages-pr-${pullRequest.number}`;
+              const currentPullRequest = (await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: pullRequest.number,
+              })).data;
+              if (currentPullRequest.head.sha !== checkRun.head_sha) {
+                core.notice(
+                  `Ignoring superseded Cloudflare check ${checkRun.id} for PR #${pullRequest.number}.`,
+                );
+                continue;
+              }
+
               const deployments = await github.paginate(
                 github.rest.repos.listDeployments,
                 {
                   owner,
                   repo,
-                  ref: checkRun.head_sha,
                   environment,
                   per_page: 100,
                 },
@@ -135,19 +146,43 @@ jobs:
               );
               if (alreadySurfaced) {
                 core.info(`PR #${pullRequest.number} already links to ${previewUrl}`);
-                continue;
+              } else {
+                await github.rest.repos.createDeploymentStatus({
+                  owner,
+                  repo,
+                  deployment_id: deployment.id,
+                  state: "success",
+                  description: "Cloudflare Pages preview is ready",
+                  environment,
+                  environment_url: previewUrl,
+                  log_url: checkRun.details_url,
+                  auto_inactive: false,
+                });
+                core.info(`Surfaced PR #${pullRequest.number} preview: ${previewUrl}`);
               }
 
-              await github.rest.repos.createDeploymentStatus({
-                owner,
-                repo,
-                deployment_id: deployment.id,
-                state: "success",
-                description: "Cloudflare Pages preview is ready",
-                environment,
-                environment_url: previewUrl,
-                log_url: checkRun.details_url,
-                auto_inactive: true,
-              });
-              core.info(`Surfaced PR #${pullRequest.number} preview: ${previewUrl}`);
+              let retired = 0;
+              for (const previousDeployment of deployments) {
+                if (previousDeployment.id === deployment.id) continue;
+                const previousStatuses = await github.rest.repos.listDeploymentStatuses({
+                  owner,
+                  repo,
+                  deployment_id: previousDeployment.id,
+                  per_page: 1,
+                });
+                if (previousStatuses.data[0]?.state !== "success") continue;
+
+                await github.rest.repos.createDeploymentStatus({
+                  owner,
+                  repo,
+                  deployment_id: previousDeployment.id,
+                  state: "inactive",
+                  description: `Superseded by ${checkRun.head_sha.slice(0, 7)}`,
+                  environment,
+                  log_url: checkRun.details_url,
+                  auto_inactive: false,
+                });
+                retired += 1;
+              }
+              core.info(`Retired ${retired} older PR #${pullRequest.number} preview(s).`);
             }
