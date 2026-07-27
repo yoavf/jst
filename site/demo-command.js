@@ -26,7 +26,9 @@ function parseForEachCat(command) {
   if (!match) return null;
 
   const glob = match[2];
-  const components = glob.split("/");
+  const pathComponents = glob.split("/");
+  const components =
+    pathComponents[0] === "." ? pathComponents.slice(1) : pathComponents;
   const starCount = [...glob].filter((character) => character === "*").length;
   if (
     glob.startsWith("/") ||

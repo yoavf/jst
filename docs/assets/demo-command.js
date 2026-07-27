@@ -9,8 +9,8 @@ var e = /* @__PURE__ */ new Set(/* @__PURE__ */ "arch.b2sum.base32.base64.basena
 function i(e) {
 	let t = e.match(r);
 	if (!t) return null;
-	let n = t[2], i = n.split("/"), a = [...n].filter((e) => e === "*").length;
-	return n.startsWith("/") || a !== 1 || i.some((e) => !e || e === "." || e === "..") || i.slice(0, -1).some((e) => e.includes("*")) ? null : {
+	let n = t[2], i = n.split("/"), a = i[0] === "." ? i.slice(1) : i, o = [...n].filter((e) => e === "*").length;
+	return n.startsWith("/") || o !== 1 || a.some((e) => !e || e === "." || e === "..") || a.slice(0, -1).some((e) => e.includes("*")) ? null : {
 		glob: n,
 		type: "for-each-cat"
 	};

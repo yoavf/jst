@@ -16,6 +16,16 @@ test("accepts a bounded loop that cats files from one relative glob", () => {
   });
 });
 
+test("accepts JST's bounded cat loop with a conventional ./ prefix", () => {
+  const command = 'for file in ./museum/*.txt; do cat "$file"; done';
+
+  assert.equal(isAllowedDemoCommand(command), true);
+  assert.deepEqual(parseDemoCommand(command), {
+    glob: "./museum/*.txt",
+    type: "for-each-cat",
+  });
+});
+
 test("rejects loops that can execute arbitrary shell syntax", () => {
   const rejected = [
     'for file in museum/*.txt; do rm "$file"; done',

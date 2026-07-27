@@ -72,7 +72,7 @@ test("runs JST's bounded cat loop against the in-memory filesystem", async () =>
     ],
   ]);
   const parsed = parseDemoCommand(
-    'for file in museum/*.txt; do cat "$file"; done',
+    'for file in ./museum/*.txt; do cat "$file"; done',
   );
   const matches = expandWorkspaceGlob(workspace, parsed.glob);
   const output = await runWasi(
