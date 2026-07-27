@@ -1128,39 +1128,52 @@ var A = "The command produced too much output, so the sandbox was reset.", j = c
 	fd_pwrite(e, t) {
 		return this.budget.consume(e.byteLength), super.fd_pwrite(e, t);
 	}
-}, P = 32 * 1024, F = new TextEncoder(), I = new TextDecoder(), L = typeof WorkerGlobalScope < "u" && self instanceof WorkerGlobalScope, R = L ? null : new URL(location.href).hash.slice(1), z = {
+}, P = 65536;
+function F(e) {
+	e.wasiImport.random_get = function(t, n) {
+		let r = new Uint8Array(e.inst.exports.memory.buffer, t, n);
+		for (let e = 0; e < n; e += P) {
+			let t = new Uint8Array(Math.min(P, n - e));
+			globalThis.crypto.getRandomValues(t), r.set(t, e);
+		}
+		return 0;
+	};
+}
+//#endregion
+//#region site/demo-sandbox.js
+var I = 32 * 1024, L = new TextEncoder(), R = new TextDecoder(), z = typeof WorkerGlobalScope < "u" && self instanceof WorkerGlobalScope, B = z ? null : new URL(location.href).hash.slice(1), V = {
 	coreutils: "/assets/uutils/uutils.wasm?v=c868c992",
 	column: "/assets/uutils/column.wasm?v=d4ed168b",
 	diffutils: "/assets/uutils/diffutils.wasm?v=d4a30573",
 	find: "/assets/uutils/find.wasm?v=6664ea48",
 	grep: "/assets/uutils/grep.wasm?v=a57e7f1e"
-}, B, V;
-function H(e) {
-	L ? self.postMessage(e) : parent.postMessage({
+}, H, U;
+function W(e) {
+	z ? self.postMessage(e) : parent.postMessage({
 		...e,
-		channel: R
+		channel: B
 	}, location.origin);
 }
-function U(e) {
-	H({
+function G(e) {
+	W({
 		type: "progress",
 		stage: e
 	});
 }
-function W(e) {
-	return new y(F.encode(e), { readonly: !0 });
+function K(e) {
+	return new y(L.encode(e), { readonly: !0 });
 }
-function G(e) {
+function q(e) {
 	return new x(new Map(e));
 }
-function K() {
+function J() {
 	let e = new v(".", /* @__PURE__ */ new Map([
-		["README.md", W("# JST playground\n\nDisposable in-memory filesystem.\nNo host filesystem. No network.\n\nPID 31337 is missing.\nLast heartbeat: 0xC0FFEE.\nFind where it was logged.\n")],
-		["downloads", G([["expenses.csv", W("date,category,amount\n2026-07-03,hosting,24\n2026-07-08,software,12\n2026-07-16,hardware,89\n")]])],
-		["logs", G([["kernel.log", W("Jul 27 00:00:01 jst kernel: process=31337 state=missing\nJul 27 00:00:02 jst kernel: heartbeat=0xC0FFEE payload=messages/core.b64\nJul 27 00:00:03 jst kernel: core_dump=0\n")]])],
-		["messages", G([["core.b64", W("SlNUX1FVRVNUX0NPTVBMRVRFX1YxCg==\n")], ["URGENT_DO_NOT_DECODE.b64", W("SlNUX1JJQ0tST0xMX1YxCg==\n")]])],
-		["museum", G([["left.txt", W("exhibit=404\nbias=left\n")], ["right.txt", W("exhibit=404\nbias=right\n")]])],
-		["projects", G([["jst", G([["src", G([["main.rs", W("fn main() {\n    println!(\"jst do this.\");\n}\n")]])]])]])]
+		["README.md", K("# JST playground\n\nDisposable in-memory filesystem.\nNo host filesystem. No network.\n\nPID 31337 is missing.\nLast heartbeat: 0xC0FFEE.\nFind where it was logged.\n")],
+		["downloads", q([["expenses.csv", K("date,category,amount\n2026-07-03,hosting,24\n2026-07-08,software,12\n2026-07-16,hardware,89\n")]])],
+		["logs", q([["kernel.log", K("Jul 27 00:00:01 jst kernel: process=31337 state=missing\nJul 27 00:00:02 jst kernel: heartbeat=0xC0FFEE payload=messages/core.b64\nJul 27 00:00:03 jst kernel: core_dump=0\n")]])],
+		["messages", q([["core.b64", K("SlNUX1FVRVNUX0NPTVBMRVRFX1YxCg==\n")], ["URGENT_DO_NOT_DECODE.b64", K("SlNUX1JJQ0tST0xMX1YxCg==\n")]])],
+		["museum", q([["left.txt", K("exhibit=404\nbias=left\n")], ["right.txt", K("exhibit=404\nbias=right\n")]])],
+		["projects", q([["jst", q([["src", q([["main.rs", K("fn main() {\n    println!(\"jst do this.\");\n}\n")]])]])]])]
 	])), t = BigInt(Date.now()) * 1000000n, n = (e) => {
 		let r = e.stat.bind(e);
 		if (e.stat = () => {
@@ -1170,7 +1183,7 @@ function K() {
 	};
 	return n(e.dir), e;
 }
-async function q(e) {
+async function Y(e) {
 	let t = await fetch(e, { cache: "force-cache" });
 	if (!t.ok) throw Error(`A Linux tool failed to load (${t.status}).`);
 	if (WebAssembly.compileStreaming) try {
@@ -1178,39 +1191,39 @@ async function q(e) {
 	} catch {}
 	return WebAssembly.compile(await t.arrayBuffer());
 }
-async function J() {
-	U("runtime"), V = K(), U("package");
-	let e = await Promise.all(Object.entries(z).map(async ([e, t]) => [e, await q(t)]));
-	B = Object.fromEntries(e), U("shell"), U("ready");
+async function X() {
+	G("runtime"), U = J(), G("package");
+	let e = await Promise.all(Object.entries(V).map(async ([e, t]) => [e, await Y(t)]));
+	H = Object.fromEntries(e), G("shell"), G("ready");
 }
-function Y(e) {
+function Z(e) {
 	let t = e.reduce((e, t) => e + t.length, 0), n = new Uint8Array(t), r = 0;
 	for (let t of e) n.set(t, r), r += t.length;
-	return I.decode(n);
+	return R.decode(n);
 }
-async function X(e, t, n, r, i = !0) {
+async function Q(e, t, n, r, i = !0) {
 	let a = [], s = [], c = new y(/* @__PURE__ */ new Uint8Array()), l = (e) => (t) => {
 		r.consume(t.byteLength), e.push(new Uint8Array(t));
 	}, u = [
-		new g(new y(F.encode(n), { readonly: !0 })),
+		new g(new y(L.encode(n), { readonly: !0 })),
 		i ? new S(l(a)) : new N(c, r),
 		new S(l(s)),
-		V
+		U
 	], d = [
 		"LANG=C.UTF-8",
 		"LC_ALL=C.UTF-8",
 		"NO_COLOR=1",
 		"TERM=dumb"
 	], m = new p(t, d, u);
-	m.wasiImport.args_sizes_get = function(e, n) {
+	F(m), m.wasiImport.args_sizes_get = function(e, n) {
 		let r = () => new DataView(m.inst.exports.memory.buffer);
 		r().setUint32(e, t.length, !0);
-		let i = t.reduce((e, t) => e + F.encode(t).length + 1, 0);
+		let i = t.reduce((e, t) => e + L.encode(t).length + 1, 0);
 		return r().setUint32(n, i, !0), 0;
 	}, m.wasiImport.environ_sizes_get = function(e, t) {
 		let n = () => new DataView(m.inst.exports.memory.buffer);
 		n().setUint32(e, d.length, !0);
-		let r = d.reduce((e, t) => e + F.encode(t).length + 1, 0);
+		let r = d.reduce((e, t) => e + L.encode(t).length + 1, 0);
 		return n().setUint32(t, r, !0), 0;
 	}, o.prototype.write_bytes = function(e, t) {
 		e.setBigUint64(t, this.dev, !0), e.setBigUint64(t + 8, this.ino, !0), e.setBigUint64(t + 16, BigInt(this.filetype), !0), e.setBigUint64(t + 24, this.nlink, !0), e.setBigUint64(t + 32, this.size, !0), e.setBigUint64(t + 40, this.atim, !0), e.setBigUint64(t + 48, this.mtim, !0), e.setBigUint64(t + 56, this.ctim, !0);
@@ -1225,28 +1238,28 @@ async function X(e, t, n, r, i = !0) {
 	}
 	return {
 		code: h,
-		stderr: Y(s),
-		stdout: i ? Y(a) : I.decode(c.data)
+		stderr: Z(s),
+		stdout: i ? Z(a) : R.decode(c.data)
 	};
 }
-async function Z(n) {
-	if (!B || !V) throw Error("The Linux tools did not finish loading.");
-	let r = t(n), i = r.type === "for-each-cat" ? O(V, r.glob) : null, a = r.type === "for-each-cat" ? [{
+async function $(n) {
+	if (!H || !U) throw Error("The Linux tools did not finish loading.");
+	let r = t(n), i = r.type === "for-each-cat" ? O(U, r.glob) : null, a = r.type === "for-each-cat" ? [{
 		args: i.length ? i : [r.glob],
 		inputPath: null,
 		name: "cat",
 		outputPath: null
-	}] : r.pipeline, o = "", s = "", c = 0, l = null, u = "", d = new M(P);
+	}] : r.pipeline, o = "", s = "", c = 0, l = null, u = "", d = new M(I);
 	for (let [t, n] of a.entries()) {
 		let { args: r, globIndexes: i, inputPath: f, name: p } = n;
-		f && (o = E(V, f));
-		let m = e.get(p) || "coreutils", h = k(V, r, i), g = p === "grep" ? ["--color=never", ...h] : h, _ = m === "coreutils" ? [
+		f && (o = E(U, f));
+		let m = e.get(p) || "coreutils", h = k(U, r, i), g = p === "grep" ? ["--color=never", ...h] : h, _ = m === "coreutils" ? [
 			"coreutils",
 			p,
 			...g
-		] : [p, ...g], v = await X(B[m], _, o, d, t === a.length - 1 && !n.outputPath);
-		if (c = v.code, o = v.stdout, s += v.stderr, F.encode(o + s).byteLength > P) throw Error("The command produced too much output, so the sandbox was reset.");
-		if (n.outputPath && (D(V, n.outputPath, o), l = n.outputPath, u = o, o = ""), c !== 0) break;
+		] : [p, ...g], v = await Q(H[m], _, o, d, t === a.length - 1 && !n.outputPath);
+		if (c = v.code, o = v.stdout, s += v.stderr, L.encode(o + s).byteLength > I) throw Error("The command produced too much output, so the sandbox was reset.");
+		if (n.outputPath && (D(U, n.outputPath, o), l = n.outputPath, u = o, o = ""), c !== 0) break;
 	}
 	return {
 		code: c,
@@ -1256,18 +1269,18 @@ async function Z(n) {
 		stdout: o
 	};
 }
-async function Q(e) {
+async function ee(e) {
 	if (e?.type === "boot") try {
-		await J(), H({ type: "ready" });
+		await X(), W({ type: "ready" });
 	} catch (e) {
-		H({
+		W({
 			type: "boot-error",
 			message: e instanceof Error ? e.message : "The sandbox failed to start."
 		});
 	}
 	else if (e?.type === "run") try {
-		let t = await Z(e.command);
-		H({
+		let t = await $(e.command);
+		W({
 			type: "output",
 			code: t.code,
 			outputPath: t.outputPath,
@@ -1276,33 +1289,33 @@ async function Q(e) {
 			stdout: t.stdout
 		});
 	} catch (e) {
-		H({
+		W({
 			type: "run-error",
 			message: e instanceof Error ? e.message : "The command failed."
 		});
 	}
 }
-if (L) self.addEventListener("message", (e) => {
-	Q(e.data);
+if (z) self.addEventListener("message", (e) => {
+	ee(e.data);
 });
 else {
 	let e = null, t = !1;
 	window.addEventListener("message", (n) => {
-		n.source !== parent || n.origin !== location.origin || n.data?.channel !== R || (n.data?.type === "boot" ? (e = new Worker("/assets/demo-sandbox.js?v=12", { type: "module" }), e.addEventListener("message", (e) => {
-			e.data?.type === "ready" && (t = !0), H(e.data);
+		n.source !== parent || n.origin !== location.origin || n.data?.channel !== B || (n.data?.type === "boot" ? (e = new Worker("/assets/demo-sandbox.js?v=13", { type: "module" }), e.addEventListener("message", (e) => {
+			e.data?.type === "ready" && (t = !0), W(e.data);
 		}), e.addEventListener("error", () => {
-			H({
+			W({
 				type: t ? "run-error" : "boot-error",
 				message: t ? "The command failed." : "The sandbox failed to start."
 			});
 		}), e.postMessage({ type: "boot" })) : n.data?.type === "run" ? e ? e.postMessage({
 			command: n.data.command,
 			type: "run"
-		}) : H({
+		}) : W({
 			type: "run-error",
 			message: "The sandbox is not available."
 		}) : n.data?.type === "destroy" && (e?.terminate(), e = null));
-	}), H({ type: "loaded" });
+	}), W({ type: "loaded" });
 }
 //#endregion
 

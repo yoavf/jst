@@ -18,6 +18,7 @@ import {
   writeWorkspaceFile,
 } from "./demo-filesystem.js";
 import { parseDemoCommand } from "./demo-command.js";
+import { installWasiRandomGet } from "./demo-wasi.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -130,6 +131,7 @@ async function runWasi(module, argv, stdin, workspace, stdoutIsTerminal = true) 
     workspace,
   ];
   const wasi = new WASI(argv, environment, fds);
+  installWasiRandomGet(wasi);
 
   wasi.wasiImport.args_sizes_get = function argsSizesGet(countPointer, sizePointer) {
     const memory = () => new DataView(wasi.inst.exports.memory.buffer);
@@ -183,6 +185,39 @@ async function runWasi(module, argv, stdin, workspace, stdoutIsTerminal = true) 
       : decoder.decode(stdoutFile.data),
   };
 }
+
+test("runs WASI utilities when SharedArrayBuffer is unavailable", async () => {
+  const find = await moduleFrom("../docs/assets/uutils/find.wasm");
+  const workspace = new PreopenDirectory(".", [
+    ["README.md", new File(encoder.encode("hello\n"), { readonly: true })],
+  ]);
+  const sharedArrayBufferDescriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "SharedArrayBuffer",
+  );
+
+  Reflect.deleteProperty(globalThis, "SharedArrayBuffer");
+  try {
+    const wasi = new WASI([], [], []);
+    wasi.inst = {
+      exports: {
+        memory: new WebAssembly.Memory({ initial: 1 }),
+      },
+    };
+    installWasiRandomGet(wasi);
+    wasi.wasiImport.random_get(0, 16);
+
+    const output = await runWasi(find, ["find", "."], "", workspace);
+    assert.equal(output.code, 0);
+    assert.match(output.stdout, /README\.md/);
+  } finally {
+    Object.defineProperty(
+      globalThis,
+      "SharedArrayBuffer",
+      sharedArrayBufferDescriptor,
+    );
+  }
+});
 
 test("passes ls output to grep through sandbox stdin", async () => {
   const [coreutils, grep] = await Promise.all([

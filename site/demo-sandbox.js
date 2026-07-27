@@ -19,6 +19,7 @@ import {
   writeWorkspaceFile,
 } from "./demo-filesystem.js";
 import { BoundedOpenFile, OutputBudget } from "./demo-output.js";
+import { installWasiRandomGet } from "./demo-wasi.js";
 
 // The execution design is adapted from the MIT-licensed uutils browser
 // playground. Pinned source revisions and checksums live beside the binaries
@@ -239,6 +240,7 @@ async function runWasi(
   ];
   const environment = ["LANG=C.UTF-8", "LC_ALL=C.UTF-8", "NO_COLOR=1", "TERM=dumb"];
   const wasi = new WASI(argv, environment, fds);
+  installWasiRandomGet(wasi);
 
   // browser_wasi_shim 0.4.0 reports UTF-16 string lengths where WASI expects
   // UTF-8 byte lengths. Patch the two size calls before instantiation.
@@ -397,7 +399,7 @@ if (isWorker) {
     }
 
     if (event.data?.type === "boot") {
-      worker = new Worker("/assets/demo-sandbox.js?v=12", { type: "module" });
+      worker = new Worker("/assets/demo-sandbox.js?v=13", { type: "module" });
       worker.addEventListener("message", (workerEvent) => {
         if (workerEvent.data?.type === "ready") workerReady = true;
         post(workerEvent.data);
