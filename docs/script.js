@@ -1,5 +1,5 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
-import { isAllowedDemoCommand } from "./assets/demo-command-v5.js";
+import { isAllowedDemoCommand } from "./assets/demo-command-v6.js";
 import { statsTotalSizeStep } from "./stats-display.js?v=1";
 
 const examples = [
@@ -745,7 +745,7 @@ async function activateDemo() {
   demoStatus.textContent = "";
 
   try {
-    const { DemoRuntime } = await import("./assets/demo-runtime.js?v=3");
+    const { DemoRuntime } = await import("./assets/demo-runtime.js?v=4");
     demoRuntime?.destroy();
     demoRuntime = new DemoRuntime({ onProgress: reportSandboxProgress });
     await demoRuntime.boot();
@@ -762,6 +762,7 @@ async function activateDemo() {
     demoSession.hidden = false;
     translationElement.setAttribute("aria-label", "Interactive JST browser demo");
     terminalTitle.textContent = "guest@jst: ~/playground";
+    demoForm.querySelector(".terminal-path").textContent = ":~/playground";
     terminalRuntime.hidden = true;
     terminalSessionActions.hidden = false;
     clearDemoScrollback();
@@ -909,6 +910,11 @@ async function submitDemo(event) {
 
     demoStatus.textContent = `running ${body.command.split(/\s/, 1)[0]} in the sandbox…`;
     const output = await demoRuntime.run(body.command);
+    const sandboxPath = output.cwd
+      ? `~/playground/${safeSandboxText(output.cwd)}`
+      : "~/playground";
+    terminalTitle.textContent = `guest@jst: ${sandboxPath}`;
+    demoForm.querySelector(".terminal-path").textContent = `:${sandboxPath}`;
     const stdout = safeSandboxText(output.stdout || "");
     const stderr = safeSandboxText(output.stderr || "");
     const redirectedStdout = safeSandboxText(output.redirectedStdout || "");
@@ -964,6 +970,8 @@ async function resetDemoSession() {
     demoDraft = "";
     prefillDemoInput();
     clearDemoScrollback();
+    terminalTitle.textContent = "guest@jst: ~/playground";
+    demoForm.querySelector(".terminal-path").textContent = ":~/playground";
     demoStatus.textContent = "";
   } catch (error) {
     demoStatus.textContent =

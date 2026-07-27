@@ -1515,7 +1515,7 @@ h3 {
 
 
 .usage {
-  padding-bottom: clamp(11rem, 20vw, 20rem);
+  padding-bottom: clamp(7rem, 12vw, 12rem);
 }
 
 .usage-sheet {

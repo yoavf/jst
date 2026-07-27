@@ -1,4 +1,8 @@
-import { Directory, File } from "@bjorn3/browser_wasi_shim";
+import {
+  Directory,
+  File,
+  PreopenDirectory,
+} from "@bjorn3/browser_wasi_shim";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -14,6 +18,57 @@ function pathComponents(path) {
     throw new Error(`${path}: not a safe sandbox path`);
   }
   return components;
+}
+
+function directoryAt(workspace, components, originalPath) {
+  let entry = workspace.dir;
+  for (const component of components) {
+    if (!(entry instanceof Directory)) {
+      throw new Error(`${originalPath}: not a directory`);
+    }
+    entry = entry.contents.get(component);
+    if (!entry) throw new Error(`${originalPath}: no such sandbox directory`);
+  }
+  if (!(entry instanceof Directory)) {
+    throw new Error(`${originalPath}: not a directory`);
+  }
+  return entry;
+}
+
+export function resolveWorkspaceDirectory(workspace, currentComponents, path) {
+  if (
+    typeof path !== "string" ||
+    !path ||
+    path.includes("\u0000")
+  ) {
+    throw new Error(`${path}: not a safe sandbox directory`);
+  }
+
+  let requested = path;
+  let components = [...currentComponents];
+  if (requested === "~" || requested === "~/playground") {
+    requested = "/";
+  } else if (requested.startsWith("~/playground/")) {
+    requested = requested.slice("~/playground".length);
+  }
+  if (requested.startsWith("/")) components = [];
+
+  for (const component of requested.split("/")) {
+    if (!component || component === ".") continue;
+    if (component === "..") {
+      components.pop();
+      continue;
+    }
+    components.push(component);
+  }
+
+  directoryAt(workspace, components, path);
+  return components;
+}
+
+export function workspaceAtDirectory(workspace, components) {
+  const directory = directoryAt(workspace, components, components.join("/") || "/");
+  return new PreopenDirectory(".", directory.contents);
 }
 
 export function readWorkspaceFile(workspace, path) {

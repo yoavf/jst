@@ -14,10 +14,14 @@ import {
 import {
   expandWorkspaceArguments,
   expandWorkspaceGlob,
+  resolveWorkspaceDirectory,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "./demo-filesystem.js";
-import { parseDemoCommand } from "./demo-command.js";
+import {
+  demoRuntimeArguments,
+  parseDemoCommand,
+} from "./demo-command.js";
 import { installWasiRandomGet } from "./demo-wasi.js";
 
 const encoder = new TextEncoder();
@@ -58,6 +62,39 @@ test("expands hidden files and directories for the shell glob .??*", () => {
     ".jst_history",
     ".vault",
   ]);
+});
+
+test("resolves persistent cd paths without escaping the playground", () => {
+  const workspace = new PreopenDirectory(".", [
+    ["README.md", new File(encoder.encode("hello\n"))],
+    [
+      "projects",
+      new Directory([
+        ["jst", new Directory([["src", new Directory([])]])],
+      ]),
+    ],
+  ]);
+
+  assert.deepEqual(resolveWorkspaceDirectory(workspace, [], "projects/jst"), [
+    "projects",
+    "jst",
+  ]);
+  assert.deepEqual(
+    resolveWorkspaceDirectory(workspace, ["projects", "jst"], "src"),
+    ["projects", "jst", "src"],
+  );
+  assert.deepEqual(
+    resolveWorkspaceDirectory(workspace, ["projects", "jst", "src"], "../.."),
+    ["projects"],
+  );
+  assert.deepEqual(
+    resolveWorkspaceDirectory(workspace, ["projects"], "/"),
+    [],
+  );
+  assert.throws(
+    () => resolveWorkspaceDirectory(workspace, [], "README.md"),
+    /not a directory/,
+  );
 });
 
 test("runs JST's bounded cat loop against the in-memory filesystem", async () => {
@@ -219,6 +256,34 @@ test("runs WASI utilities when SharedArrayBuffer is unavailable", async () => {
   }
 });
 
+test("edits an in-memory file with the shipped sed binary", async () => {
+  const sed = await moduleFrom("../docs/assets/uutils/sed.wasm");
+  const workspace = new PreopenDirectory(".", [
+    [
+      "clue.txt",
+      new File(encoder.encode("heartbeat=0xC0FFEE\n"), { readonly: true }),
+    ],
+  ]);
+
+  const output = await runWasi(
+    sed,
+    [
+      "sed",
+      ...demoRuntimeArguments("sed", [
+        "-i",
+        "s/0xC0FFEE/0xBADC0DE/g",
+        "clue.txt",
+      ]),
+    ],
+    "",
+    workspace,
+  );
+
+  assert.equal(output.code, 0);
+  assert.equal(output.stderr, "");
+  assert.equal(readWorkspaceFile(workspace, "clue.txt"), "heartbeat=0xBADC0DE\n");
+});
+
 test("passes ls output to grep through sandbox stdin", async () => {
   const [coreutils, grep] = await Promise.all([
     moduleFrom("../docs/assets/uutils/uutils.wasm"),
@@ -272,7 +337,7 @@ test("solves the four-call lost-process quest with the shipped WASM tools", asyn
           "kernel.log",
           new File(
             encoder.encode(
-              "heartbeat=0xC0FFEE payload=messages/core.b64\n",
+              "heartbeat=0xC0FFEE payload=messages/.core.b64\n",
             ),
             { readonly: true },
           ),
@@ -283,7 +348,7 @@ test("solves the four-call lost-process quest with the shipped WASM tools", asyn
       "messages",
       new Directory([
         [
-          "core.b64",
+          ".core.b64",
           new File(
             encoder.encode(
               "SlNUX1FVRVNUX0NPTVBMRVRFX1YxCg==\n",
@@ -330,11 +395,11 @@ test("solves the four-call lost-process quest with the shipped WASM tools", asyn
     "",
     workspace,
   );
-  assert.match(marker.stdout, /payload=messages\/core\.b64/);
+  assert.match(marker.stdout, /payload=messages\/\.core\.b64/);
 
   const decodedResult = await runWasi(
     coreutils,
-    ["coreutils", "base64", "-d", "messages/core.b64"],
+    ["coreutils", "base64", "-d", "messages/.core.b64"],
     "",
     workspace,
   );

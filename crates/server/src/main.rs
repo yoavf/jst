@@ -32,6 +32,7 @@ const DEMO_COMMANDS: &[&str] = &[
     "basename",
     "basenc",
     "cat",
+    "cd",
     "cksum",
     "cmp",
     "column",
@@ -75,6 +76,7 @@ const DEMO_COMMANDS: &[&str] = &[
     "realpath",
     "rm",
     "rmdir",
+    "sed",
     "seq",
     "sha1sum",
     "sha224sum",
@@ -899,6 +901,17 @@ fn is_allowed_demo_command(command: &str) -> bool {
         let Some(words) = parse_demo_words(segment) else {
             return false;
         };
+        let is_cd = words.first().is_some_and(|name| name == "cd");
+        if is_cd
+            && (segments.len() != 1
+                || words.len() > 2
+                || words.iter().any(|word| matches!(word.as_str(), "<" | ">"))
+                || words
+                    .get(1)
+                    .is_some_and(|argument| argument.starts_with('-')))
+        {
+            return false;
+        }
         let Some(command_words) =
             split_demo_redirections(&words, index == segments.len().saturating_sub(1))
         else {
@@ -1177,6 +1190,10 @@ mod tests {
         assert!(is_allowed_demo_command("cat 'README.md' | wc -l"));
         assert!(is_allowed_demo_command("find . -type f -name '*.rs'"));
         assert!(is_allowed_demo_command("grep -R TODO projects"));
+        assert!(is_allowed_demo_command("sed -i 's/TODO/DONE/g' todo.txt"));
+        assert!(is_allowed_demo_command("cd projects/jst"));
+        assert!(is_allowed_demo_command("cd .."));
+        assert!(is_allowed_demo_command("cd /"));
         assert!(is_allowed_demo_command("sha256sum README.md"));
         assert!(is_allowed_demo_command("diff README.md todo.txt"));
         assert!(is_allowed_demo_command("mkdir -p photos"));
@@ -1197,6 +1214,10 @@ mod tests {
         assert!(!is_allowed_demo_command("bash -c 'uname -a'"));
         assert!(!is_allowed_demo_command("du -ah ."));
         assert!(!is_allowed_demo_command("rg TODO projects"));
+        assert!(!is_allowed_demo_command("cd projects | ls"));
+        assert!(!is_allowed_demo_command("cd one two"));
+        assert!(!is_allowed_demo_command("cd --help"));
+        assert!(!is_allowed_demo_command("cd < README.md"));
         assert!(!is_allowed_demo_command("cat data.json | jq '.name'"));
         assert!(!is_allowed_demo_command("cat README.md > /tmp/copy.txt"));
         assert!(!is_allowed_demo_command("cat README.md > ../copy.txt"));

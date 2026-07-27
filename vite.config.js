@@ -7,7 +7,7 @@ export default defineConfig({
     lib: {
       entry: {
         "demo-cli": "site/demo-cli.js",
-        "demo-command-v5": "site/demo-command.js",
+        "demo-command-v6": "site/demo-command.js",
         "demo-runtime": "site/demo-runtime.js",
         "demo-sandbox": "site/demo-sandbox.js",
       },

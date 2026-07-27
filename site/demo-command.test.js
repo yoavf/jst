@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  demoRuntimeArguments,
   isAllowedDemoCommand,
   parseDemoCommand,
   parseDemoPipeline,
@@ -62,6 +63,45 @@ test("accepts JST's simple decode-to-file translation", () => {
       outputPath: "messages/URGENT_DO_NOT_DECODE.txt",
     },
   ]);
+});
+
+test("accepts sed substitutions and a standalone cd", () => {
+  assert.deepEqual(
+    parseDemoPipeline("sed -i 's/0xC0FFEE/0xBADC0DE/g' messages/.core.b64"),
+    [
+      {
+        args: [
+          "-i",
+          "s/0xC0FFEE/0xBADC0DE/g",
+          "messages/.core.b64",
+        ],
+        inputPath: null,
+        name: "sed",
+        outputPath: null,
+      },
+    ],
+  );
+  assert.deepEqual(parseDemoPipeline("cd messages"), [
+    {
+      args: ["messages"],
+      inputPath: null,
+      name: "cd",
+      outputPath: null,
+    },
+  ]);
+  assert.deepEqual(
+    demoRuntimeArguments("sed", [
+      "-i",
+      "s/0xC0FFEE/0xBADC0DE/g",
+      "messages/.core.b64",
+    ]),
+    [
+      "-i",
+      "-e",
+      "s/0xC0FFEE/0xBADC0DE/g",
+      "messages/.core.b64",
+    ],
+  );
 });
 
 test("keeps output redirection inside one relative sandbox path", () => {

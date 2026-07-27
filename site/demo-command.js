@@ -15,7 +15,23 @@ export const DEMO_STANDALONE_COMMANDS = new Map([
   ["diff", "diffutils"],
   ["find", "find"],
   ["grep", "grep"],
+  ["sed", "sed"],
 ]);
+
+export const DEMO_BUILTIN_COMMANDS = new Set(["cd"]);
+
+export function demoRuntimeArguments(name, args) {
+  if (name === "grep") return ["--color=never", ...args];
+  if (
+    name === "sed" &&
+    (args[0] === "-i" || args[0] === "--in-place") &&
+    args[1] &&
+    !args[1].startsWith("-")
+  ) {
+    return [args[0], "-e", ...args.slice(1)];
+  }
+  return args;
+}
 
 const UNSAFE_DEMO_COMMAND = /[\\`;&$(){}!#\u0000-\u001f\u007f]/;
 const FOR_EACH_CAT_COMMAND =
@@ -158,8 +174,22 @@ export function parseDemoPipeline(command) {
       word.hasUnquotedGlob ? [index] : [],
     );
     const available =
-      DEMO_COREUTILS_COMMANDS.has(name) || DEMO_STANDALONE_COMMANDS.has(name);
+      DEMO_COREUTILS_COMMANDS.has(name) ||
+      DEMO_STANDALONE_COMMANDS.has(name) ||
+      DEMO_BUILTIN_COMMANDS.has(name);
     if (!name || !available || hasUnsafeArguments(name, args)) {
+      throw new Error("That command is outside the browser toolbox.");
+    }
+    if (
+      name === "cd" &&
+      (
+        segments.length !== 1 ||
+        inputPath !== null ||
+        outputPath !== null ||
+        args.length > 1 ||
+        args[0]?.startsWith("-")
+      )
+    ) {
       throw new Error("That command is outside the browser toolbox.");
     }
     return {

@@ -10,12 +10,15 @@ import {
 } from "@bjorn3/browser_wasi_shim";
 import {
   DEMO_STANDALONE_COMMANDS,
+  demoRuntimeArguments,
   parseDemoCommand,
 } from "./demo-command.js";
 import {
   expandWorkspaceArguments,
   expandWorkspaceGlob,
   readWorkspaceFile,
+  resolveWorkspaceDirectory,
+  workspaceAtDirectory,
   writeWorkspaceFile,
 } from "./demo-filesystem.js";
 import { BoundedOpenFile, OutputBudget } from "./demo-output.js";
@@ -37,10 +40,12 @@ const moduleUrls = {
   diffutils: "/assets/uutils/diffutils.wasm?v=d4a30573",
   find: "/assets/uutils/find.wasm?v=6664ea48",
   grep: "/assets/uutils/grep.wasm?v=a57e7f1e",
+  sed: "/assets/uutils/sed.wasm?v=dab89970",
 };
 
 let modules;
 let workspace;
+let workingDirectory;
 
 function post(message) {
   if (isWorker) {
@@ -95,7 +100,7 @@ Find where it was logged.
         [
           "kernel.log",
           file(`Jul 27 00:00:01 jst kernel: process=31337 state=missing
-Jul 27 00:00:02 jst kernel: heartbeat=0xC0FFEE payload=messages/core.b64
+Jul 27 00:00:02 jst kernel: heartbeat=0xC0FFEE payload=messages/.core.b64
 Jul 27 00:00:03 jst kernel: core_dump=0
 `),
         ],
@@ -105,7 +110,7 @@ Jul 27 00:00:03 jst kernel: core_dump=0
       "messages",
       directory([
         [
-          "core.b64",
+          ".core.b64",
           file(`SlNUX1FVRVNUX0NPTVBMRVRFX1YxCg==
 `),
         ],
@@ -191,6 +196,7 @@ async function compileModule(url) {
 async function boot() {
   progress("runtime");
   workspace = buildWorkspace();
+  workingDirectory = [];
   progress("package");
   const compiled = await Promise.all(
     Object.entries(moduleUrls).map(async ([name, url]) => [
@@ -219,6 +225,7 @@ async function runWasi(
   argv,
   stdin,
   outputBudget,
+  runWorkspace,
   stdoutIsTerminal = true,
 ) {
   const stdoutChunks = [];
@@ -236,7 +243,7 @@ async function runWasi(
       ? new ConsoleStdout(capture(stdoutChunks))
       : new BoundedOpenFile(stdoutFile, outputBudget),
     new ConsoleStdout(capture(stderrChunks)),
-    workspace,
+    runWorkspace,
   ];
   const environment = ["LANG=C.UTF-8", "LC_ALL=C.UTF-8", "NO_COLOR=1", "TERM=dumb"];
   const wasi = new WASI(argv, environment, fds);
@@ -298,8 +305,27 @@ async function run(command) {
   if (!modules || !workspace) throw new Error("The Linux tools did not finish loading.");
 
   const parsedCommand = parseDemoCommand(command);
+  if (
+    parsedCommand.type === "pipeline" &&
+    parsedCommand.pipeline[0]?.name === "cd"
+  ) {
+    workingDirectory = resolveWorkspaceDirectory(
+      workspace,
+      workingDirectory,
+      parsedCommand.pipeline[0].args[0] || "/",
+    );
+    return {
+      code: 0,
+      cwd: workingDirectory.join("/"),
+      outputPath: null,
+      redirectedStdout: "",
+      stderr: "",
+      stdout: "",
+    };
+  }
+  const activeWorkspace = workspaceAtDirectory(workspace, workingDirectory);
   const loopMatches = parsedCommand.type === "for-each-cat"
-    ? expandWorkspaceGlob(workspace, parsedCommand.glob)
+    ? expandWorkspaceGlob(activeWorkspace, parsedCommand.glob)
     : null;
   const pipeline = parsedCommand.type === "for-each-cat"
     ? [{
@@ -317,12 +343,14 @@ async function run(command) {
   const outputBudget = new OutputBudget(MAX_OUTPUT_BYTES);
   for (const [index, segment] of pipeline.entries()) {
     const { args, globIndexes, inputPath, name } = segment;
-    if (inputPath) stdin = readWorkspaceFile(workspace, inputPath);
+    if (inputPath) stdin = readWorkspaceFile(activeWorkspace, inputPath);
     const moduleName = DEMO_STANDALONE_COMMANDS.get(name) || "coreutils";
-    const expandedArgs = expandWorkspaceArguments(workspace, args, globIndexes);
-    const runtimeArgs = name === "grep"
-      ? ["--color=never", ...expandedArgs]
-      : expandedArgs;
+    const expandedArgs = expandWorkspaceArguments(
+      activeWorkspace,
+      args,
+      globIndexes,
+    );
+    const runtimeArgs = demoRuntimeArguments(name, expandedArgs);
     const argv = moduleName === "coreutils"
       ? ["coreutils", name, ...runtimeArgs]
       : [name, ...runtimeArgs];
@@ -331,6 +359,7 @@ async function run(command) {
       argv,
       stdin,
       outputBudget,
+      activeWorkspace,
       index === pipeline.length - 1 && !segment.outputPath,
     );
     code = output.code;
@@ -340,14 +369,21 @@ async function run(command) {
       throw new Error("The command produced too much output, so the sandbox was reset.");
     }
     if (segment.outputPath) {
-      writeWorkspaceFile(workspace, segment.outputPath, stdin);
+      writeWorkspaceFile(activeWorkspace, segment.outputPath, stdin);
       outputPath = segment.outputPath;
       redirectedStdout = stdin;
       stdin = "";
     }
     if (code !== 0) break;
   }
-  return { code, outputPath, redirectedStdout, stderr, stdout: stdin };
+  return {
+    code,
+    cwd: workingDirectory.join("/"),
+    outputPath,
+    redirectedStdout,
+    stderr,
+    stdout: stdin,
+  };
 }
 
 async function handleWorkerMessage(message) {
@@ -367,6 +403,7 @@ async function handleWorkerMessage(message) {
       post({
         type: "output",
         code: output.code,
+        cwd: output.cwd,
         outputPath: output.outputPath,
         redirectedStdout: output.redirectedStdout,
         stderr: output.stderr,
@@ -399,7 +436,7 @@ if (isWorker) {
     }
 
     if (event.data?.type === "boot") {
-      worker = new Worker("/assets/demo-sandbox.js?v=14", { type: "module" });
+      worker = new Worker("/assets/demo-sandbox.js?v=15", { type: "module" });
       worker.addEventListener("message", (workerEvent) => {
         if (workerEvent.data?.type === "ready") workerReady = true;
         post(workerEvent.data);

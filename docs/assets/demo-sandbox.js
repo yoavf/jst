@@ -1,5 +1,5 @@
-import { DEMO_STANDALONE_COMMANDS as e, parseDemoCommand as t } from "./demo-command-v5.js";
-var n = class e {
+import { DEMO_STANDALONE_COMMANDS as e, demoRuntimeArguments as t, parseDemoCommand as n } from "./demo-command-v6.js";
+var r = class e {
 	static read_bytes(t, n) {
 		let r = new e();
 		return r.buf = t.getUint32(n, !0), r.buf_len = t.getUint32(n + 4, !0), r;
@@ -9,7 +9,7 @@ var n = class e {
 		for (let a = 0; a < r; a++) i.push(e.read_bytes(t, n + 8 * a));
 		return i;
 	}
-}, r = class e {
+}, i = class e {
 	static read_bytes(t, n) {
 		let r = new e();
 		return r.buf = t.getUint32(n, !0), r.buf_len = t.getUint32(n + 4, !0), r;
@@ -19,7 +19,7 @@ var n = class e {
 		for (let a = 0; a < r; a++) i.push(e.read_bytes(t, n + 8 * a));
 		return i;
 	}
-}, i = class {
+}, a = class {
 	head_length() {
 		return 24;
 	}
@@ -36,38 +36,38 @@ var n = class e {
 		let i = new TextEncoder().encode(n);
 		this.d_next = e, this.d_ino = t, this.d_namlen = i.byteLength, this.d_type = r, this.dir_name = i;
 	}
-}, a = class {
+}, o = class {
 	write_bytes(e, t) {
 		e.setUint8(t, this.fs_filetype), e.setUint16(t + 2, this.fs_flags, !0), e.setBigUint64(t + 8, this.fs_rights_base, !0), e.setBigUint64(t + 16, this.fs_rights_inherited, !0);
 	}
 	constructor(e, t) {
 		this.fs_rights_base = 0n, this.fs_rights_inherited = 0n, this.fs_filetype = e, this.fs_flags = t;
 	}
-}, o = class {
+}, s = class {
 	write_bytes(e, t) {
 		e.setBigUint64(t, this.dev, !0), e.setBigUint64(t + 8, this.ino, !0), e.setUint8(t + 16, this.filetype), e.setBigUint64(t + 24, this.nlink, !0), e.setBigUint64(t + 32, this.size, !0), e.setBigUint64(t + 38, this.atim, !0), e.setBigUint64(t + 46, this.mtim, !0), e.setBigUint64(t + 52, this.ctim, !0);
 	}
 	constructor(e, t, n) {
 		this.dev = 0n, this.nlink = 0n, this.atim = 0n, this.mtim = 0n, this.ctim = 0n, this.ino = e, this.filetype = t, this.size = n;
 	}
-}, s = class {
+}, c = class {
 	write_bytes(e, t) {
 		e.setUint32(t, this.pr_name.byteLength, !0);
 	}
 	constructor(e) {
 		this.pr_name = new TextEncoder().encode(e);
 	}
-}, c = class e {
+}, l = class e {
 	static dir(t) {
 		let n = new e();
-		return n.tag = 0, n.inner = new s(t), n;
+		return n.tag = 0, n.inner = new c(t), n;
 	}
 	write_bytes(e, t) {
 		e.setUint32(t, this.tag, !0), this.inner.write_bytes(e, t + 4);
 	}
-}, l = class {
+}, u = class {
 	enable(e) {
-		this.log = u(e === void 0 || e, this.prefix);
+		this.log = d(e === void 0 || e, this.prefix);
 	}
 	get enabled() {
 		return this.isEnabled;
@@ -76,28 +76,28 @@ var n = class e {
 		this.isEnabled = e, this.prefix = "wasi:", this.enable(e);
 	}
 };
-function u(e, t) {
+function d(e, t) {
 	return e ? console.log.bind(console, "%c%s", "color: #265BA0", t) : () => {};
 }
-var d = new l(!1), f = class extends Error {
+var f = new u(!1), p = class extends Error {
 	constructor(e) {
 		super("exit with exit code " + e), this.code = e;
 	}
-}, p = class {
+}, m = class {
 	start(e) {
 		this.inst = e;
 		try {
 			return e.exports._start(), 0;
 		} catch (e) {
-			if (e instanceof f) return e.code;
+			if (e instanceof p) return e.code;
 			throw e;
 		}
 	}
 	initialize(e) {
 		this.inst = e, e.exports._initialize && e.exports._initialize();
 	}
-	constructor(e, t, i, a = {}) {
-		this.args = [], this.env = [], this.fds = [], d.enable(a.debug), this.args = e, this.env = t, this.fds = i;
+	constructor(e, t, n, a = {}) {
+		this.args = [], this.env = [], this.fds = [], f.enable(a.debug), this.args = e, this.env = t, this.fds = n;
 		let o = this;
 		this.wasiImport = {
 			args_sizes_get(e, t) {
@@ -105,7 +105,7 @@ var d = new l(!1), f = class extends Error {
 				n.setUint32(e, o.args.length, !0);
 				let r = 0;
 				for (let e of o.args) r += e.length + 1;
-				return n.setUint32(t, r, !0), d.log(n.getUint32(e, !0), n.getUint32(t, !0)), 0;
+				return n.setUint32(t, r, !0), f.log(n.getUint32(e, !0), n.getUint32(t, !0)), 0;
 			},
 			args_get(e, t) {
 				let n = new DataView(o.inst.exports.memory.buffer), r = new Uint8Array(o.inst.exports.memory.buffer), i = t;
@@ -114,14 +114,14 @@ var d = new l(!1), f = class extends Error {
 					let a = new TextEncoder().encode(o.args[i]);
 					r.set(a, t), n.setUint8(t + a.length, 0), t += a.length + 1;
 				}
-				return d.enabled && d.log(new TextDecoder("utf-8").decode(r.slice(i, t))), 0;
+				return f.enabled && f.log(new TextDecoder("utf-8").decode(r.slice(i, t))), 0;
 			},
 			environ_sizes_get(e, t) {
 				let n = new DataView(o.inst.exports.memory.buffer);
 				n.setUint32(e, o.env.length, !0);
 				let r = 0;
 				for (let e of o.env) r += e.length + 1;
-				return n.setUint32(t, r, !0), d.log(n.getUint32(e, !0), n.getUint32(t, !0)), 0;
+				return n.setUint32(t, r, !0), f.log(n.getUint32(e, !0), n.getUint32(t, !0)), 0;
 			},
 			environ_get(e, t) {
 				let n = new DataView(o.inst.exports.memory.buffer), r = new Uint8Array(o.inst.exports.memory.buffer), i = t;
@@ -130,7 +130,7 @@ var d = new l(!1), f = class extends Error {
 					let a = new TextEncoder().encode(o.env[i]);
 					r.set(a, t), n.setUint8(t + a.length, 0), t += a.length + 1;
 				}
-				return d.enabled && d.log(new TextDecoder("utf-8").decode(r.slice(i, t))), 0;
+				return f.enabled && f.log(new TextDecoder("utf-8").decode(r.slice(i, t))), 0;
 			},
 			clock_res_get(e, t) {
 				let n;
@@ -198,10 +198,10 @@ var d = new l(!1), f = class extends Error {
 			fd_filestat_set_times(e, t, n, r) {
 				return o.fds[e] == null ? 8 : o.fds[e].fd_filestat_set_times(t, n, r);
 			},
-			fd_pread(e, t, r, i, a) {
+			fd_pread(e, t, n, i, a) {
 				let s = new DataView(o.inst.exports.memory.buffer), c = new Uint8Array(o.inst.exports.memory.buffer);
 				if (o.fds[e] != null) {
-					let l = n.read_bytes_array(s, t, r), u = 0;
+					let l = r.read_bytes_array(s, t, n), u = 0;
 					for (let t of l) {
 						let { ret: n, data: r } = o.fds[e].fd_pread(t.buf_len, i);
 						if (n != 0) return s.setUint32(a, u, !0), n;
@@ -225,22 +225,22 @@ var d = new l(!1), f = class extends Error {
 					return new Uint8Array(o.inst.exports.memory.buffer).set(a.slice(0, n), t), a.byteLength > n ? 37 : 0;
 				} else return 8;
 			},
-			fd_pwrite(e, t, n, i, a) {
+			fd_pwrite(e, t, n, r, a) {
 				let s = new DataView(o.inst.exports.memory.buffer), c = new Uint8Array(o.inst.exports.memory.buffer);
 				if (o.fds[e] != null) {
-					let l = r.read_bytes_array(s, t, n), u = 0;
+					let l = i.read_bytes_array(s, t, n), u = 0;
 					for (let t of l) {
-						let n = c.slice(t.buf, t.buf + t.buf_len), { ret: r, nwritten: l } = o.fds[e].fd_pwrite(n, i);
-						if (r != 0) return s.setUint32(a, u, !0), r;
-						if (u += l, i += BigInt(l), l != n.byteLength) break;
+						let n = c.slice(t.buf, t.buf + t.buf_len), { ret: i, nwritten: l } = o.fds[e].fd_pwrite(n, r);
+						if (i != 0) return s.setUint32(a, u, !0), i;
+						if (u += l, r += BigInt(l), l != n.byteLength) break;
 					}
 					return s.setUint32(a, u, !0), 0;
 				} else return 8;
 			},
-			fd_read(e, t, r, i) {
+			fd_read(e, t, n, i) {
 				let a = new DataView(o.inst.exports.memory.buffer), s = new Uint8Array(o.inst.exports.memory.buffer);
 				if (o.fds[e] != null) {
-					let c = n.read_bytes_array(a, t, r), l = 0;
+					let c = r.read_bytes_array(a, t, n), l = 0;
 					for (let t of c) {
 						let { ret: n, data: r } = o.fds[e].fd_read(t.buf_len);
 						if (n != 0) return a.setUint32(i, l, !0), n;
@@ -294,16 +294,16 @@ var d = new l(!1), f = class extends Error {
 					return n.setBigUint64(t, i, !0), r;
 				} else return 8;
 			},
-			fd_write(e, t, n, i) {
+			fd_write(e, t, n, r) {
 				let a = new DataView(o.inst.exports.memory.buffer), s = new Uint8Array(o.inst.exports.memory.buffer);
 				if (o.fds[e] != null) {
-					let c = r.read_bytes_array(a, t, n), l = 0;
+					let c = i.read_bytes_array(a, t, n), l = 0;
 					for (let t of c) {
-						let n = s.slice(t.buf, t.buf + t.buf_len), { ret: r, nwritten: c } = o.fds[e].fd_write(n);
-						if (r != 0) return a.setUint32(i, l, !0), r;
+						let n = s.slice(t.buf, t.buf + t.buf_len), { ret: i, nwritten: c } = o.fds[e].fd_write(n);
+						if (i != 0) return a.setUint32(r, l, !0), i;
 						if (l += c, c != n.byteLength) break;
 					}
-					return a.setUint32(i, l, !0), 0;
+					return a.setUint32(r, l, !0), 0;
 				} else return 8;
 			},
 			path_create_directory(e, t, n) {
@@ -335,10 +335,10 @@ var d = new l(!1), f = class extends Error {
 				} else return 8;
 			},
 			path_open(e, t, n, r, i, a, s, c, l) {
-				let u = new DataView(o.inst.exports.memory.buffer), f = new Uint8Array(o.inst.exports.memory.buffer);
+				let u = new DataView(o.inst.exports.memory.buffer), d = new Uint8Array(o.inst.exports.memory.buffer);
 				if (o.fds[e] != null) {
-					let p = new TextDecoder("utf-8").decode(f.slice(n, n + r));
-					d.log(p);
+					let p = new TextDecoder("utf-8").decode(d.slice(n, n + r));
+					f.log(p);
 					let { ret: m, fd_obj: h } = o.fds[e].path_open(t, p, i, a, s, c);
 					if (m != 0) return m;
 					o.fds.push(h);
@@ -350,10 +350,10 @@ var d = new l(!1), f = class extends Error {
 				let s = new DataView(o.inst.exports.memory.buffer), c = new Uint8Array(o.inst.exports.memory.buffer);
 				if (o.fds[e] != null) {
 					let l = new TextDecoder("utf-8").decode(c.slice(t, t + n));
-					d.log(l);
-					let { ret: u, data: f } = o.fds[e].path_readlink(l);
-					if (f != null) {
-						let e = new TextEncoder().encode(f);
+					f.log(l);
+					let { ret: u, data: d } = o.fds[e].path_readlink(l);
+					if (d != null) {
+						let e = new TextEncoder().encode(d);
 						if (e.length > i) return s.setUint32(a, 0, !0), 8;
 						c.set(e, r), s.setUint32(a, e.length, !0);
 					}
@@ -391,7 +391,7 @@ var d = new l(!1), f = class extends Error {
 				throw "async io not supported";
 			},
 			proc_exit(e) {
-				throw new f(e);
+				throw new p(e);
 			},
 			proc_raise(e) {
 				throw "raised signal " + e;
@@ -416,7 +416,7 @@ var d = new l(!1), f = class extends Error {
 			}
 		};
 	}
-}, m = class {
+}, h = class {
 	fd_allocate(e, t) {
 		return 58;
 	}
@@ -546,7 +546,7 @@ var d = new l(!1), f = class extends Error {
 	path_unlink_file(e) {
 		return 58;
 	}
-}, h = class e {
+}, g = class e {
 	static issue_ino() {
 		return e.next_ino++;
 	}
@@ -557,10 +557,10 @@ var d = new l(!1), f = class extends Error {
 		this.ino = e.issue_ino();
 	}
 };
-h.next_ino = 1n;
+g.next_ino = 1n;
 //#endregion
 //#region node_modules/@bjorn3/browser_wasi_shim/dist/fs_mem.js
-var g = class extends m {
+var _ = class extends h {
 	fd_allocate(e, t) {
 		if (!(this.file.size > e + t)) {
 			let n = new Uint8Array(Number(e + t));
@@ -571,7 +571,7 @@ var g = class extends m {
 	fd_fdstat_get() {
 		return {
 			ret: 0,
-			fdstat: new a(4, 0)
+			fdstat: new o(4, 0)
 		};
 	}
 	fd_filestat_set_size(e) {
@@ -663,7 +663,7 @@ var g = class extends m {
 	constructor(e) {
 		super(), this.file_pos = 0n, this.file = e;
 	}
-}, _ = class extends m {
+}, v = class extends h {
 	fd_seek(e, t) {
 		return {
 			ret: 8,
@@ -682,17 +682,17 @@ var g = class extends m {
 	fd_fdstat_get() {
 		return {
 			ret: 0,
-			fdstat: new a(3, 0)
+			fdstat: new o(3, 0)
 		};
 	}
 	fd_readdir_single(e) {
-		if (d.enabled && (d.log("readdir_single", e), d.log(e, this.dir.contents.keys())), e == 0n) return {
+		if (f.enabled && (f.log("readdir_single", e), f.log(e, this.dir.contents.keys())), e == 0n) return {
 			ret: 0,
-			dirent: new i(1n, this.dir.ino, ".", 3)
+			dirent: new a(1n, this.dir.ino, ".", 3)
 		};
 		if (e == 1n) return {
 			ret: 0,
-			dirent: new i(2n, this.dir.parent_ino(), "..", 3)
+			dirent: new a(2n, this.dir.parent_ino(), "..", 3)
 		};
 		if (e >= BigInt(this.dir.contents.size) + 2n) return {
 			ret: 0,
@@ -701,11 +701,11 @@ var g = class extends m {
 		let [t, n] = Array.from(this.dir.contents.entries())[Number(e - 2n)];
 		return {
 			ret: 0,
-			dirent: new i(e + 1n, n.ino, t, n.stat().filetype)
+			dirent: new a(e + 1n, n.ino, t, n.stat().filetype)
 		};
 	}
 	path_filestat_get(e, t) {
-		let { ret: n, path: r } = b.from(t);
+		let { ret: n, path: r } = x.from(t);
 		if (r == null) return {
 			ret: n,
 			filestat: null
@@ -720,7 +720,7 @@ var g = class extends m {
 		};
 	}
 	path_lookup(e, t) {
-		let { ret: n, path: r } = b.from(e);
+		let { ret: n, path: r } = x.from(e);
 		if (r == null) return {
 			ret: n,
 			inode_obj: null
@@ -735,7 +735,7 @@ var g = class extends m {
 		};
 	}
 	path_open(e, t, n, r, i, a) {
-		let { ret: o, path: s } = b.from(t);
+		let { ret: o, path: s } = x.from(t);
 		if (s == null) return {
 			ret: o,
 			fd_obj: null
@@ -770,14 +770,14 @@ var g = class extends m {
 		return this.path_open(0, e, 3, 0n, 0n, 0).ret;
 	}
 	path_link(e, t, n) {
-		let { ret: r, path: i } = b.from(e);
+		let { ret: r, path: i } = x.from(e);
 		if (i == null) return r;
 		if (i.is_dir) return 44;
 		let { ret: a, parent_entry: o, filename: s, entry: c } = this.dir.get_parent_dir_and_entry_for_path(i, !0);
 		if (o == null || s == null) return a;
 		if (c != null) {
 			let e = t.stat().filetype == 3, r = c.stat().filetype == 3;
-			if (e && r) if (n && c instanceof x) {
+			if (e && r) if (n && c instanceof S) {
 				if (c.contents.size != 0) return 55;
 			} else return 20;
 			else if (e && !r) return 54;
@@ -787,7 +787,7 @@ var g = class extends m {
 		return !n && t.stat().filetype == 3 ? 63 : (o.contents.set(s, t), 0);
 	}
 	path_unlink(e) {
-		let { ret: t, path: n } = b.from(e);
+		let { ret: t, path: n } = x.from(e);
 		if (n == null) return {
 			ret: t,
 			inode_obj: null
@@ -805,16 +805,16 @@ var g = class extends m {
 		});
 	}
 	path_unlink_file(e) {
-		let { ret: t, path: n } = b.from(e);
+		let { ret: t, path: n } = x.from(e);
 		if (n == null) return t;
 		let { ret: r, parent_entry: i, filename: a, entry: o } = this.dir.get_parent_dir_and_entry_for_path(n, !1);
 		return i == null || a == null || o == null ? r : o.stat().filetype === 3 ? 31 : (i.contents.delete(a), 0);
 	}
 	path_remove_directory(e) {
-		let { ret: t, path: n } = b.from(e);
+		let { ret: t, path: n } = x.from(e);
 		if (n == null) return t;
 		let { ret: r, parent_entry: i, filename: a, entry: o } = this.dir.get_parent_dir_and_entry_for_path(n, !1);
-		return i == null || a == null || o == null ? r : !(o instanceof x) || o.stat().filetype !== 3 ? 54 : o.contents.size === 0 ? i.contents.delete(a) ? 0 : 44 : 55;
+		return i == null || a == null || o == null ? r : !(o instanceof S) || o.stat().filetype !== 3 ? 54 : o.contents.size === 0 ? i.contents.delete(a) ? 0 : 44 : 55;
 	}
 	fd_filestat_get() {
 		return {
@@ -852,17 +852,17 @@ var g = class extends m {
 	constructor(e) {
 		super(), this.dir = e;
 	}
-}, v = class extends _ {
+}, y = class extends v {
 	fd_prestat_get() {
 		return {
 			ret: 0,
-			prestat: c.dir(this.prestat_name)
+			prestat: l.dir(this.prestat_name)
 		};
 	}
 	constructor(e, t) {
-		super(new x(t)), this.prestat_name = e;
+		super(new S(t)), this.prestat_name = e;
 	}
-}, y = class extends h {
+}, b = class extends g {
 	path_open(e, t, n) {
 		if (this.readonly && (t & BigInt(64)) == BigInt(64)) return {
 			ret: 63,
@@ -875,7 +875,7 @@ var g = class extends m {
 			};
 			this.data = new Uint8Array([]);
 		}
-		let r = new g(this);
+		let r = new _(this);
 		return n & 1 && r.fd_seek(0n, 2), {
 			ret: 0,
 			fd_obj: r
@@ -885,12 +885,12 @@ var g = class extends m {
 		return BigInt(this.data.byteLength);
 	}
 	stat() {
-		return new o(this.ino, 4, this.size);
+		return new s(this.ino, 4, this.size);
 	}
 	constructor(e, t) {
 		super(), this.data = new Uint8Array(e), this.readonly = !!t?.readonly;
 	}
-}, b = class e {
+}, x = class e {
 	static from(t) {
 		let n = new e();
 		if (n.is_dir = t.endsWith("/"), t.startsWith("/")) return {
@@ -923,18 +923,18 @@ var g = class extends m {
 	constructor() {
 		this.parts = [], this.is_dir = !1;
 	}
-}, x = class e extends h {
+}, S = class e extends g {
 	parent_ino() {
-		return this.parent == null ? h.root_ino() : this.parent.ino;
+		return this.parent == null ? g.root_ino() : this.parent.ino;
 	}
 	path_open(e, t, n) {
 		return {
 			ret: 0,
-			fd_obj: new _(this)
+			fd_obj: new v(this)
 		};
 	}
 	stat() {
-		return new o(this.ino, 3, 0n);
+		return new s(this.ino, 3, 0n);
 	}
 	get_entry_for_path(t) {
 		let n = this;
@@ -945,7 +945,7 @@ var g = class extends m {
 			};
 			let t = n.contents.get(r);
 			if (t !== void 0) n = t;
-			else return d.log(r), {
+			else return f.log(r), {
 				ret: 44,
 				entry: null
 			};
@@ -1003,7 +1003,7 @@ var g = class extends m {
 		};
 	}
 	create_entry_for_path(t, n) {
-		let { ret: r, path: i } = b.from(t);
+		let { ret: r, path: i } = x.from(t);
 		if (i == null) return {
 			ret: r,
 			entry: null
@@ -1017,9 +1017,9 @@ var g = class extends m {
 			ret: 20,
 			entry: null
 		};
-		d.log("create", i);
+		f.log("create", i);
 		let l;
-		return l = n ? new e(/* @__PURE__ */ new Map()) : new y(/* @__PURE__ */ new ArrayBuffer(0)), o.contents.set(s, l), c = l, {
+		return l = n ? new e(/* @__PURE__ */ new Map()) : new b(/* @__PURE__ */ new ArrayBuffer(0)), o.contents.set(s, l), c = l, {
 			ret: 0,
 			entry: c
 		};
@@ -1028,15 +1028,15 @@ var g = class extends m {
 		super(), this.parent = null, t instanceof Array ? this.contents = new Map(t) : this.contents = t;
 		for (let t of this.contents.values()) t instanceof e && (t.parent = this);
 	}
-}, S = class e extends m {
+}, C = class e extends h {
 	fd_filestat_get() {
 		return {
 			ret: 0,
-			filestat: new o(this.ino, 2, BigInt(0))
+			filestat: new s(this.ino, 2, BigInt(0))
 		};
 	}
 	fd_fdstat_get() {
-		let e = new a(2, 0);
+		let e = new o(2, 0);
 		return e.fs_rights_base = BigInt(64), {
 			ret: 0,
 			fdstat: e
@@ -1057,68 +1057,93 @@ var g = class extends m {
 		});
 	}
 	constructor(e) {
-		super(), this.ino = h.issue_ino(), this.write = e;
+		super(), this.ino = g.issue_ino(), this.write = e;
 	}
-}, C = new TextEncoder(), w = new TextDecoder();
-function T(e) {
+}, w = new TextEncoder(), T = new TextDecoder();
+function E(e) {
 	let t = e.split("/").filter((e) => e !== ".");
 	if (!e || e.startsWith("/") || t.length === 0 || t.some((e) => !e || e === "..")) throw Error(`${e}: not a safe sandbox path`);
 	return t;
 }
-function E(e, t) {
+function D(e, t, n) {
+	let r = e.dir;
+	for (let e of t) {
+		if (!(r instanceof S)) throw Error(`${n}: not a directory`);
+		if (r = r.contents.get(e), !r) throw Error(`${n}: no such sandbox directory`);
+	}
+	if (!(r instanceof S)) throw Error(`${n}: not a directory`);
+	return r;
+}
+function O(e, t, n) {
+	if (typeof n != "string" || !n || n.includes("\0")) throw Error(`${n}: not a safe sandbox directory`);
+	let r = n, i = [...t];
+	r === "~" || r === "~/playground" ? r = "/" : r.startsWith("~/playground/") && (r = r.slice(12)), r.startsWith("/") && (i = []);
+	for (let e of r.split("/")) if (!(!e || e === ".")) {
+		if (e === "..") {
+			i.pop();
+			continue;
+		}
+		i.push(e);
+	}
+	return D(e, i, n), i;
+}
+function k(e, t) {
+	return new y(".", D(e, t, t.join("/") || "/").contents);
+}
+function A(e, t) {
 	let n = e.dir;
-	for (let e of T(t)) {
-		if (!(n instanceof x)) throw Error(`${t}: not a readable sandbox file`);
+	for (let e of E(t)) {
+		if (!(n instanceof S)) throw Error(`${t}: not a readable sandbox file`);
 		if (n = n.contents.get(e), !n) throw Error(`${t}: no such sandbox file`);
 	}
-	if (!(n instanceof y)) throw Error(`${t}: not a regular file`);
-	return w.decode(n.data);
+	if (!(n instanceof b)) throw Error(`${t}: not a regular file`);
+	return T.decode(n.data);
 }
-function D(e, t, n) {
-	let r = T(t), i = r.pop(), a = e.dir;
+function j(e, t, n) {
+	let r = E(t), i = r.pop(), a = e.dir;
 	for (let e of r) {
-		if (!(a instanceof x)) throw Error(`${t}: parent is not a directory`);
+		if (!(a instanceof S)) throw Error(`${t}: parent is not a directory`);
 		if (a = a.contents.get(e), !a) throw Error(`${t}: parent directory does not exist`);
 	}
-	if (!(a instanceof x)) throw Error(`${t}: parent is not a directory`);
-	if (a.contents.get(i) instanceof x) throw Error(`${t}: is a directory`);
-	a.contents.set(i, new y(C.encode(n)));
+	if (!(a instanceof S)) throw Error(`${t}: parent is not a directory`);
+	if (a.contents.get(i) instanceof S) throw Error(`${t}: is a directory`);
+	a.contents.set(i, new b(w.encode(n)));
 }
-function O(e, t) {
-	let n = T(t), r = n.pop();
+function M(e, t) {
+	let n = E(t), r = n.pop();
 	if (!/[*?]/.test(r) || n.some((e) => /[*?]/.test(e))) throw Error(`${t}: not a supported sandbox glob`);
 	let i = e.dir;
-	for (let e of n) if (!(i instanceof x) || (i = i.contents.get(e), !i)) return [];
-	if (!(i instanceof x)) return [];
+	for (let e of n) if (!(i instanceof S) || (i = i.contents.get(e), !i)) return [];
+	if (!(i instanceof S)) return [];
 	let a = "";
 	for (let e of r) e === "*" ? a += ".*" : e === "?" ? a += "." : a += e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	let o = RegExp(`^${a}$`), s = n.length ? `${n.join("/")}/` : "", c = [...i.contents.entries()].filter(([e, t]) => (t instanceof y || t instanceof x) && (r.startsWith(".") || !e.startsWith(".")) && o.test(e)).map(([e]) => `${s}${e}`).sort();
+	let o = RegExp(`^${a}$`), s = n.length ? `${n.join("/")}/` : "", c = [...i.contents.entries()].filter(([e, t]) => (t instanceof b || t instanceof S) && (r.startsWith(".") || !e.startsWith(".")) && o.test(e)).map(([e]) => `${s}${e}`).sort();
 	if (c.length > 128) throw Error(`${t}: matched too many sandbox paths`);
 	return c;
 }
-function k(e, t, n = []) {
+function N(e, t, n = []) {
 	let r = new Set(n);
 	return t.flatMap((t, n) => {
 		if (!r.has(n)) return [t];
-		let i = O(e, t);
+		let i = M(e, t);
 		return i.length ? i : [t];
 	});
 }
 //#endregion
 //#region site/demo-output.js
-var A = "The command produced too much output, so the sandbox was reset.", j = class extends Error {
+var P = "The command produced too much output, so the sandbox was reset.", F = class extends Error {
 	constructor() {
-		super(A), this.name = "OutputLimitError";
+		super(P), this.name = "OutputLimitError";
 	}
-}, M = class {
+}, I = class {
 	constructor(e) {
 		this.maxBytes = e, this.usedBytes = 0;
 	}
 	consume(e) {
-		if (this.usedBytes + e > this.maxBytes) throw new j();
+		if (this.usedBytes + e > this.maxBytes) throw new F();
 		this.usedBytes += e;
 	}
-}, N = class extends g {
+}, L = class extends _ {
 	constructor(e, t) {
 		super(e), this.budget = t;
 	}
@@ -1128,12 +1153,12 @@ var A = "The command produced too much output, so the sandbox was reset.", j = c
 	fd_pwrite(e, t) {
 		return this.budget.consume(e.byteLength), super.fd_pwrite(e, t);
 	}
-}, P = 65536;
-function F(e) {
+}, R = 65536;
+function z(e) {
 	e.wasiImport.random_get = function(t, n) {
 		let r = new Uint8Array(e.inst.exports.memory.buffer, t, n);
-		for (let e = 0; e < n; e += P) {
-			let t = new Uint8Array(Math.min(P, n - e));
+		for (let e = 0; e < n; e += R) {
+			let t = new Uint8Array(Math.min(R, n - e));
 			globalThis.crypto.getRandomValues(t), r.set(t, e);
 		}
 		return 0;
@@ -1141,39 +1166,40 @@ function F(e) {
 }
 //#endregion
 //#region site/demo-sandbox.js
-var I = 32 * 1024, L = new TextEncoder(), R = new TextDecoder(), z = typeof WorkerGlobalScope < "u" && self instanceof WorkerGlobalScope, B = z ? null : new URL(location.href).hash.slice(1), V = {
+var B = 32 * 1024, V = new TextEncoder(), H = new TextDecoder(), U = typeof WorkerGlobalScope < "u" && self instanceof WorkerGlobalScope, W = U ? null : new URL(location.href).hash.slice(1), G = {
 	coreutils: "/assets/uutils/uutils.wasm?v=c868c992",
 	column: "/assets/uutils/column.wasm?v=d4ed168b",
 	diffutils: "/assets/uutils/diffutils.wasm?v=d4a30573",
 	find: "/assets/uutils/find.wasm?v=6664ea48",
-	grep: "/assets/uutils/grep.wasm?v=a57e7f1e"
-}, H, U;
-function W(e) {
-	z ? self.postMessage(e) : parent.postMessage({
+	grep: "/assets/uutils/grep.wasm?v=a57e7f1e",
+	sed: "/assets/uutils/sed.wasm?v=dab89970"
+}, K, q, J;
+function Y(e) {
+	U ? self.postMessage(e) : parent.postMessage({
 		...e,
-		channel: B
+		channel: W
 	}, location.origin);
 }
-function G(e) {
-	W({
+function X(e) {
+	Y({
 		type: "progress",
 		stage: e
 	});
 }
-function K(e) {
-	return new y(L.encode(e), { readonly: !0 });
+function Z(e) {
+	return new b(V.encode(e), { readonly: !0 });
 }
-function q(e) {
-	return new x(new Map(e));
+function Q(e) {
+	return new S(new Map(e));
 }
-function J() {
-	let e = new v(".", /* @__PURE__ */ new Map([
-		["README.md", K("# JST playground\n\nDisposable in-memory filesystem.\nNo host filesystem. No network.\n\nPID 31337 is missing.\nLast heartbeat: 0xC0FFEE.\nFind where it was logged.\n")],
-		["downloads", q([["expenses.csv", K("date,category,amount\n2026-07-03,hosting,24\n2026-07-08,software,12\n2026-07-16,hardware,89\n")]])],
-		["logs", q([["kernel.log", K("Jul 27 00:00:01 jst kernel: process=31337 state=missing\nJul 27 00:00:02 jst kernel: heartbeat=0xC0FFEE payload=messages/core.b64\nJul 27 00:00:03 jst kernel: core_dump=0\n")]])],
-		["messages", q([["core.b64", K("SlNUX1FVRVNUX0NPTVBMRVRFX1YxCg==\n")], ["URGENT_DO_NOT_DECODE.b64", K("SlNUX1JJQ0tST0xMX1YxCg==\n")]])],
-		["museum", q([["left.txt", K("exhibit=404\nbias=left\n")], ["right.txt", K("exhibit=404\nbias=right\n")]])],
-		["projects", q([["jst", q([["src", q([["main.rs", K("fn main() {\n    println!(\"jst do this.\");\n}\n")]])]])]])]
+function ee() {
+	let e = new y(".", /* @__PURE__ */ new Map([
+		["README.md", Z("# JST playground\n\nDisposable in-memory filesystem.\nNo host filesystem. No network.\n\nPID 31337 is missing.\nLast heartbeat: 0xC0FFEE.\nFind where it was logged.\n")],
+		["downloads", Q([["expenses.csv", Z("date,category,amount\n2026-07-03,hosting,24\n2026-07-08,software,12\n2026-07-16,hardware,89\n")]])],
+		["logs", Q([["kernel.log", Z("Jul 27 00:00:01 jst kernel: process=31337 state=missing\nJul 27 00:00:02 jst kernel: heartbeat=0xC0FFEE payload=messages/.core.b64\nJul 27 00:00:03 jst kernel: core_dump=0\n")]])],
+		["messages", Q([[".core.b64", Z("SlNUX1FVRVNUX0NPTVBMRVRFX1YxCg==\n")], ["URGENT_DO_NOT_DECODE.b64", Z("SlNUX1JJQ0tST0xMX1YxCg==\n")]])],
+		["museum", Q([["left.txt", Z("exhibit=404\nbias=left\n")], ["right.txt", Z("exhibit=404\nbias=right\n")]])],
+		["projects", Q([["jst", Q([["src", Q([["main.rs", Z("fn main() {\n    println!(\"jst do this.\");\n}\n")]])]])]])]
 	])), t = BigInt(Date.now()) * 1000000n, n = (e) => {
 		let r = e.stat.bind(e);
 		if (e.stat = () => {
@@ -1183,7 +1209,7 @@ function J() {
 	};
 	return n(e.dir), e;
 }
-async function Y(e) {
+async function te(e) {
 	let t = await fetch(e, { cache: "force-cache" });
 	if (!t.ok) throw Error(`A Linux tool failed to load (${t.status}).`);
 	if (WebAssembly.compileStreaming) try {
@@ -1191,131 +1217,142 @@ async function Y(e) {
 	} catch {}
 	return WebAssembly.compile(await t.arrayBuffer());
 }
-async function X() {
-	G("runtime"), U = J(), G("package");
-	let e = await Promise.all(Object.entries(V).map(async ([e, t]) => [e, await Y(t)]));
-	H = Object.fromEntries(e), G("shell"), G("ready");
+async function ne() {
+	X("runtime"), q = ee(), J = [], X("package");
+	let e = await Promise.all(Object.entries(G).map(async ([e, t]) => [e, await te(t)]));
+	K = Object.fromEntries(e), X("shell"), X("ready");
 }
-function Z(e) {
+function $(e) {
 	let t = e.reduce((e, t) => e + t.length, 0), n = new Uint8Array(t), r = 0;
 	for (let t of e) n.set(t, r), r += t.length;
-	return R.decode(n);
+	return H.decode(n);
 }
-async function Q(e, t, n, r, i = !0) {
-	let a = [], s = [], c = new y(/* @__PURE__ */ new Uint8Array()), l = (e) => (t) => {
+async function re(e, t, n, r, i, a = !0) {
+	let o = [], c = [], l = new b(/* @__PURE__ */ new Uint8Array()), u = (e) => (t) => {
 		r.consume(t.byteLength), e.push(new Uint8Array(t));
-	}, u = [
-		new g(new y(L.encode(n), { readonly: !0 })),
-		i ? new S(l(a)) : new N(c, r),
-		new S(l(s)),
-		U
-	], d = [
+	}, d = [
+		new _(new b(V.encode(n), { readonly: !0 })),
+		a ? new C(u(o)) : new L(l, r),
+		new C(u(c)),
+		i
+	], f = [
 		"LANG=C.UTF-8",
 		"LC_ALL=C.UTF-8",
 		"NO_COLOR=1",
 		"TERM=dumb"
-	], m = new p(t, d, u);
-	F(m), m.wasiImport.args_sizes_get = function(e, n) {
-		let r = () => new DataView(m.inst.exports.memory.buffer);
+	], h = new m(t, f, d);
+	z(h), h.wasiImport.args_sizes_get = function(e, n) {
+		let r = () => new DataView(h.inst.exports.memory.buffer);
 		r().setUint32(e, t.length, !0);
-		let i = t.reduce((e, t) => e + L.encode(t).length + 1, 0);
+		let i = t.reduce((e, t) => e + V.encode(t).length + 1, 0);
 		return r().setUint32(n, i, !0), 0;
-	}, m.wasiImport.environ_sizes_get = function(e, t) {
-		let n = () => new DataView(m.inst.exports.memory.buffer);
-		n().setUint32(e, d.length, !0);
-		let r = d.reduce((e, t) => e + L.encode(t).length + 1, 0);
+	}, h.wasiImport.environ_sizes_get = function(e, t) {
+		let n = () => new DataView(h.inst.exports.memory.buffer);
+		n().setUint32(e, f.length, !0);
+		let r = f.reduce((e, t) => e + V.encode(t).length + 1, 0);
 		return n().setUint32(t, r, !0), 0;
-	}, o.prototype.write_bytes = function(e, t) {
+	}, s.prototype.write_bytes = function(e, t) {
 		e.setBigUint64(t, this.dev, !0), e.setBigUint64(t + 8, this.ino, !0), e.setBigUint64(t + 16, BigInt(this.filetype), !0), e.setBigUint64(t + 24, this.nlink, !0), e.setBigUint64(t + 32, this.size, !0), e.setBigUint64(t + 40, this.atim, !0), e.setBigUint64(t + 48, this.mtim, !0), e.setBigUint64(t + 56, this.ctim, !0);
 	};
-	let h = 0;
+	let g = 0;
 	try {
-		let t = await WebAssembly.instantiate(e, { wasi_snapshot_preview1: m.wasiImport });
-		m.start(t.instance || t);
+		let t = await WebAssembly.instantiate(e, { wasi_snapshot_preview1: h.wasiImport });
+		h.start(t.instance || t);
 	} catch (e) {
-		if (e instanceof f) h = e.code;
+		if (e instanceof p) g = e.code;
 		else throw e;
 	}
 	return {
-		code: h,
-		stderr: Z(s),
-		stdout: i ? Z(a) : R.decode(c.data)
+		code: g,
+		stderr: $(c),
+		stdout: a ? $(o) : H.decode(l.data)
 	};
 }
-async function $(n) {
-	if (!H || !U) throw Error("The Linux tools did not finish loading.");
-	let r = t(n), i = r.type === "for-each-cat" ? O(U, r.glob) : null, a = r.type === "for-each-cat" ? [{
-		args: i.length ? i : [r.glob],
+async function ie(r) {
+	if (!K || !q) throw Error("The Linux tools did not finish loading.");
+	let i = n(r);
+	if (i.type === "pipeline" && i.pipeline[0]?.name === "cd") return J = O(q, J, i.pipeline[0].args[0] || "/"), {
+		code: 0,
+		cwd: J.join("/"),
+		outputPath: null,
+		redirectedStdout: "",
+		stderr: "",
+		stdout: ""
+	};
+	let a = k(q, J), o = i.type === "for-each-cat" ? M(a, i.glob) : null, s = i.type === "for-each-cat" ? [{
+		args: o.length ? o : [i.glob],
 		inputPath: null,
 		name: "cat",
 		outputPath: null
-	}] : r.pipeline, o = "", s = "", c = 0, l = null, u = "", d = new M(I);
-	for (let [t, n] of a.entries()) {
-		let { args: r, globIndexes: i, inputPath: f, name: p } = n;
-		f && (o = E(U, f));
-		let m = e.get(p) || "coreutils", h = k(U, r, i), g = p === "grep" ? ["--color=never", ...h] : h, _ = m === "coreutils" ? [
+	}] : i.pipeline, c = "", l = "", u = 0, d = null, f = "", p = new I(B);
+	for (let [n, r] of s.entries()) {
+		let { args: i, globIndexes: o, inputPath: m, name: h } = r;
+		m && (c = A(a, m));
+		let g = e.get(h) || "coreutils", _ = t(h, N(a, i, o)), v = g === "coreutils" ? [
 			"coreutils",
-			p,
-			...g
-		] : [p, ...g], v = await Q(H[m], _, o, d, t === a.length - 1 && !n.outputPath);
-		if (c = v.code, o = v.stdout, s += v.stderr, L.encode(o + s).byteLength > I) throw Error("The command produced too much output, so the sandbox was reset.");
-		if (n.outputPath && (D(U, n.outputPath, o), l = n.outputPath, u = o, o = ""), c !== 0) break;
+			h,
+			..._
+		] : [h, ..._], y = await re(K[g], v, c, p, a, n === s.length - 1 && !r.outputPath);
+		if (u = y.code, c = y.stdout, l += y.stderr, V.encode(c + l).byteLength > B) throw Error("The command produced too much output, so the sandbox was reset.");
+		if (r.outputPath && (j(a, r.outputPath, c), d = r.outputPath, f = c, c = ""), u !== 0) break;
 	}
 	return {
-		code: c,
-		outputPath: l,
-		redirectedStdout: u,
-		stderr: s,
-		stdout: o
+		code: u,
+		cwd: J.join("/"),
+		outputPath: d,
+		redirectedStdout: f,
+		stderr: l,
+		stdout: c
 	};
 }
-async function ee(e) {
+async function ae(e) {
 	if (e?.type === "boot") try {
-		await X(), W({ type: "ready" });
+		await ne(), Y({ type: "ready" });
 	} catch (e) {
-		W({
+		Y({
 			type: "boot-error",
 			message: e instanceof Error ? e.message : "The sandbox failed to start."
 		});
 	}
 	else if (e?.type === "run") try {
-		let t = await $(e.command);
-		W({
+		let t = await ie(e.command);
+		Y({
 			type: "output",
 			code: t.code,
+			cwd: t.cwd,
 			outputPath: t.outputPath,
 			redirectedStdout: t.redirectedStdout,
 			stderr: t.stderr,
 			stdout: t.stdout
 		});
 	} catch (e) {
-		W({
+		Y({
 			type: "run-error",
 			message: e instanceof Error ? e.message : "The command failed."
 		});
 	}
 }
-if (z) self.addEventListener("message", (e) => {
-	ee(e.data);
+if (U) self.addEventListener("message", (e) => {
+	ae(e.data);
 });
 else {
 	let e = null, t = !1;
 	window.addEventListener("message", (n) => {
-		n.source !== parent || n.origin !== location.origin || n.data?.channel !== B || (n.data?.type === "boot" ? (e = new Worker("/assets/demo-sandbox.js?v=14", { type: "module" }), e.addEventListener("message", (e) => {
-			e.data?.type === "ready" && (t = !0), W(e.data);
+		n.source !== parent || n.origin !== location.origin || n.data?.channel !== W || (n.data?.type === "boot" ? (e = new Worker("/assets/demo-sandbox.js?v=15", { type: "module" }), e.addEventListener("message", (e) => {
+			e.data?.type === "ready" && (t = !0), Y(e.data);
 		}), e.addEventListener("error", () => {
-			W({
+			Y({
 				type: t ? "run-error" : "boot-error",
 				message: t ? "The command failed." : "The sandbox failed to start."
 			});
 		}), e.postMessage({ type: "boot" })) : n.data?.type === "run" ? e ? e.postMessage({
 			command: n.data.command,
 			type: "run"
-		}) : W({
+		}) : Y({
 			type: "run-error",
 			message: "The sandbox is not available."
 		}) : n.data?.type === "destroy" && (e?.terminate(), e = null));
-	}), W({ type: "loaded" });
+	}), Y({ type: "loaded" });
 }
 //#endregion
 
