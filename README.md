@@ -140,6 +140,39 @@ The hosted server currently applies these safeguards:
   clients and provider outages identified separately from JST server errors.
 - Rate-limit response headers for each active quota.
 
+### Browser demo
+
+The website’s “try it now” flow uses the real hosted translator through a
+separate `POST /demo` endpoint, then executes the returned command entirely in
+the browser with pinned uutils WebAssembly binaries and an in-memory WASI
+filesystem. The browser runtime is deliberately narrower than the CLI:
+
+- More than 50 Rust coreutils plus `find`, `grep`, `diff`, and `cmp` may run.
+  File utilities can modify only the disposable in-memory workspace. Simple
+  pipelines and bounded input redirection are supported; output redirects,
+  substitutions, loops, nested shells, process-spawning flags, and other shell
+  control syntax are rejected by the server, page, and sandbox.
+- Every terminal session gets a small fake filesystem. Its in-memory state
+  persists between commands so a directory created with `mkdir` can be listed
+  afterward. Reset, page exit, timeout, or excessive output destroys it. No
+  host files, processes, environment variables, or credentials are mounted.
+- The WASI shim exposes no sockets or host syscalls. Each command is stopped
+  after six seconds or 32 KiB of output.
+- Output is rendered as text after terminal controls and bidirectional display
+  controls are escaped.
+
+The website stores a random browser UUID locally and sends it only as a soft
+quota identifier. The hosted service applies independent rolling browser,
+per-minute, client IP, and global limits. Exact quotas are intentionally not
+shown in the terminal. IP and global caps remain the spending backstop because
+a user can clear browser storage and receive a new UUID.
+
+`DEMO_ALLOWED_ORIGINS` is a comma-separated exact origin allowlist for the
+browser endpoint. `DEMO_MONTHLY_REQUEST_LIMIT`,
+`DEMO_REQUESTS_PER_MINUTE`, `DEMO_DAILY_REQUESTS_PER_IP`, and
+`DEMO_GLOBAL_DAILY_REQUEST_LIMIT` configure its independent quota namespace.
+Each numeric limit accepts `0` to disable it.
+
 The CLI creates a random installation ID in its config directory and sends it
 with translation requests. The server stores only a hash of that ID; older
 clients fall back to a Fly-provided IP address. When
@@ -180,6 +213,9 @@ Fly's `Fly-Client-IP` header; self-hosters should only enable IP limits behind a
 proxy that overwrites that header rather than accepting it from clients.
 Configure `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to share both
 rate-limit counters and aggregate usage statistics across server instances.
+The `/stats` snapshot includes browser-toolbox miss totals and the most common
+missing base commands. Prompts, arguments, paths, and complete generated
+commands are never retained.
 `LLM_API_KEY` is optional for local APIs that do not require authentication.
 `LLM_FALLBACK_MODEL` optionally selects a model to try when `LLM_MODEL` fails.
 Alternatively, `JST_API_URL` can point directly to any service implementing
@@ -194,6 +230,20 @@ and push to `main`.
 cargo test --workspace
 cargo build --workspace
 ```
+
+The site is served from `docs/`. Its browser sandbox bundle is generated from
+`site/`; the pinned uutils binaries and their checksums are documented in
+`docs/assets/uutils/ATTRIBUTION.md`:
+
+```sh
+npm ci
+npm run build:demo
+npm run dev:demo
+```
+
+The production host applies the COOP/COEP headers in `docs/_headers` as
+additional browser isolation, even though this single-threaded WASI runtime
+does not require `SharedArrayBuffer`.
 
 The reusable [model benchmark](crates/server/examples/benchmark_models.md)
 compares command generation, effect classification, parse reliability, and

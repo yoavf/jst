@@ -9,6 +9,31 @@ const MAX_EXPLANATION_BYTES: usize = 1024;
 const MAX_EXPLANATION_PARTS: usize = 8;
 const MAX_EXPLANATION_PART_BYTES: usize = 512;
 const MODEL_TIMEOUT: Duration = Duration::from_secs(5);
+const DEMO_SYSTEM_ADDENDUM: &str = r#"
+
+BROWSER DEMO CONSTRAINTS:
+Return one sandbox-safe command made only from the following executable names:
+arch, b2sum, base32, base64, basename, basenc, cat, cksum, cmp, comm, cut, date,
+column, cp, diff, dir, dircolors, dirname, echo, expand, factor, false, find, fmt,
+fold, grep, head, join, link, ln, ls, md5sum, mkdir, mktemp, mv, nl, nproc,
+numfmt, od, paste, pathchk, pr, printenv, printf, ptx, pwd, readlink, realpath,
+rm, rmdir, seq, sha1sum, sha224sum, sha256sum, sha384sum, sha512sum, shuf, sort,
+sum, tail, touch, tr, true, tsort, tty, uname, unexpand, uniq, unlink, vdir, wc.
+Pipelines using | and simple input redirection using < FILE are allowed. Do not
+use any other shell syntax, output redirection, substitution, command chaining,
+find -exec/-execdir/-ok/-okdir/-delete, sort -o, sort --output, or sort
+--compress-program. One bounded loop form is allowed:
+`for NAME in RELATIVE/*.EXT; do cat "$NAME"; done`.
+The filesystem is a small fake workspace. File changes made
+by the listed utilities stay only in that disposable workspace. The workspace
+persists for the current terminal session and is destroyed on reset or page
+exit. Preserve paths from the user's request exactly. For a tabular CSV display,
+use `column -s, -t FILE`. For size-sorted entries, use
+`ls -lhS | head -n 10`; `du` is not available under browser WASI.
+For requests that read, decode, inspect, or display data, write the result to
+stdout. Do not redirect it into a file unless the user explicitly asks to save,
+write, or create one.
+"#;
 // Headroom for reasoning-capable models: thinking tokens count against
 // max_tokens on some providers, and a small budget truncates the JSON output.
 const MAX_OUTPUT_TOKENS: u32 = 2048;
@@ -64,6 +89,27 @@ pub async fn translate(
     .await
 }
 
+pub async fn translate_demo(
+    client: &reqwest::Client,
+    api_url: &str,
+    api_key: &str,
+    model: &str,
+    fallback_model: Option<&str>,
+    req: &TranslateRequest,
+) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
+    translate_with_timeout_profile(
+        client,
+        api_url,
+        api_key,
+        model,
+        fallback_model,
+        req,
+        MODEL_TIMEOUT,
+        true,
+    )
+    .await
+}
+
 async fn translate_with_timeout(
     client: &reqwest::Client,
     api_url: &str,
@@ -73,9 +119,33 @@ async fn translate_with_timeout(
     req: &TranslateRequest,
     model_timeout: Duration,
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
+    translate_with_timeout_profile(
+        client,
+        api_url,
+        api_key,
+        model,
+        fallback_model,
+        req,
+        model_timeout,
+        false,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn translate_with_timeout_profile(
+    client: &reqwest::Client,
+    api_url: &str,
+    api_key: &str,
+    model: &str,
+    fallback_model: Option<&str>,
+    req: &TranslateRequest,
+    model_timeout: Duration,
+    demo_mode: bool,
+) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
     let primary_error = match tokio::time::timeout(
         model_timeout,
-        translate_with_model(client, api_url, api_key, model, req),
+        translate_with_model(client, api_url, api_key, model, req, demo_mode),
     )
     .await
     {
@@ -97,7 +167,7 @@ async fn translate_with_timeout(
 
     let fallback_result = match tokio::time::timeout(
         model_timeout,
-        translate_with_model(client, api_url, api_key, fallback_model, req),
+        translate_with_model(client, api_url, api_key, fallback_model, req, demo_mode),
     )
     .await
     {
@@ -127,10 +197,11 @@ async fn translate_with_model(
     api_key: &str,
     model: &str,
     req: &TranslateRequest,
+    demo_mode: bool,
 ) -> Result<TranslateResponse, Box<dyn std::error::Error + Send + Sync>> {
     let max_retries = 1;
     for attempt in 0..=max_retries {
-        match call_llm(client, api_url, api_key, model, req).await {
+        match call_llm(client, api_url, api_key, model, req, demo_mode).await {
             Ok(response) => return Ok(response),
             Err((error, finish_reason)) if finish_reason.as_deref() == Some("error") => {
                 if attempt < max_retries {
@@ -155,8 +226,13 @@ async fn call_llm(
     api_key: &str,
     model: &str,
     req: &TranslateRequest,
+    demo_mode: bool,
 ) -> Result<TranslateResponse, (Box<dyn std::error::Error + Send + Sync>, Option<String>)> {
-    let system_prompt = build_system_prompt(req.os.as_deref(), req.shell.as_deref(), req.explain);
+    let mut system_prompt =
+        build_system_prompt(req.os.as_deref(), req.shell.as_deref(), req.explain);
+    if demo_mode {
+        system_prompt.push_str(DEMO_SYSTEM_ADDENDUM);
+    }
     let user_prompt = user_prompt(req);
 
     let chat_request = ChatRequest {

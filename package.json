@@ -1,0 +1,16 @@
+{
+  "name": "jst-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:demo": "vite build",
+    "dev:demo": "vite docs --config vite.config.js --base / --host 127.0.0.1",
+    "test:demo": "node --test site/*.test.js"
+  },
+  "devDependencies": {
+    "vite": "8.1.5"
+  },
+  "dependencies": {
+    "@bjorn3/browser_wasi_shim": "^0.4.0"
+  }
+}

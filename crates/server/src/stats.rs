@@ -13,6 +13,8 @@ const DAILY_TREND_DAYS: u64 = 30;
 const DAY_KEY_TTL_SECONDS: u64 = 40 * 24 * 60 * 60;
 const TOTAL_KEY: &str = "jst:stats:total";
 const COMMANDS_KEY: &str = "jst:stats:commands";
+const TOOLBOX_MISSES_TOTAL_KEY: &str = "jst:stats:toolbox-misses:total";
+const TOOLBOX_MISSES_COMMANDS_KEY: &str = "jst:stats:toolbox-misses:commands";
 const DAY_KEY_PREFIX: &str = "jst:stats:day:";
 const COMMAND_WRAPPERS: [&str; 8] = [
     "sudo", "doas", "env", "time", "nice", "command", "builtin", "noglob",
@@ -33,6 +35,8 @@ pub struct StatsCollector {
 struct Buffer {
     total: u64,
     commands: HashMap<String, u64>,
+    toolbox_misses: u64,
+    toolbox_miss_commands: HashMap<String, u64>,
 }
 
 struct CachedSnapshot {
@@ -44,6 +48,8 @@ struct CachedSnapshot {
 pub struct StatsSnapshot {
     pub total: u64,
     pub top_commands: Vec<CommandCount>,
+    pub browser_toolbox_misses: u64,
+    pub top_browser_toolbox_misses: Vec<CommandCount>,
     pub daily: Vec<DayCount>,
     pub generated_at: u64,
 }
@@ -96,6 +102,21 @@ impl StatsCollector {
         }
     }
 
+    /// Counts a browser-toolbox rejection without retaining the prompt,
+    /// arguments, paths, or complete generated command.
+    pub fn record_toolbox_miss(&self, command: &str) {
+        let mut buffer = self.buffer.lock().expect("stats buffer lock poisoned");
+        buffer.toolbox_misses += 1;
+        let Some(base) = base_command(command) else {
+            return;
+        };
+        if buffer.toolbox_miss_commands.len() < MAX_BUFFERED_COMMANDS
+            || buffer.toolbox_miss_commands.contains_key(&base)
+        {
+            *buffer.toolbox_miss_commands.entry(base).or_default() += 1;
+        }
+    }
+
     pub async fn flush_loop(self: Arc<Self>) {
         loop {
             tokio::time::sleep(FLUSH_INTERVAL).await;
@@ -108,7 +129,11 @@ impl StatsCollector {
             let mut pending = self.buffer.lock().expect("stats buffer lock poisoned");
             std::mem::take(&mut *pending)
         };
-        if buffer.total == 0 && buffer.commands.is_empty() {
+        if buffer.total == 0
+            && buffer.commands.is_empty()
+            && buffer.toolbox_misses == 0
+            && buffer.toolbox_miss_commands.is_empty()
+        {
             return;
         }
         if let Err(error) = self
@@ -175,6 +200,15 @@ impl StatsCollector {
                 "REV",
                 "WITHSCORES"
             ]),
+            serde_json::json!(["GET", TOOLBOX_MISSES_TOTAL_KEY]),
+            serde_json::json!([
+                "ZRANGE",
+                TOOLBOX_MISSES_COMMANDS_KEY,
+                "0",
+                (TOP_COMMANDS - 1).to_string(),
+                "REV",
+                "WITHSCORES"
+            ]),
         ];
         for date in &dates {
             commands.push(serde_json::json!(["GET", day_key(date)]));
@@ -209,6 +243,10 @@ impl Buffer {
         self.total += other.total;
         for (command, count) in other.commands {
             *self.commands.entry(command).or_default() += count;
+        }
+        self.toolbox_misses += other.toolbox_misses;
+        for (command, count) in other.toolbox_miss_commands {
+            *self.toolbox_miss_commands.entry(command).or_default() += count;
         }
     }
 }
@@ -259,7 +297,8 @@ fn is_env_assignment(token: &str) -> bool {
 }
 
 fn flush_body(buffer: &Buffer, today: &str) -> serde_json::Value {
-    let mut commands = Vec::with_capacity(buffer.commands.len() + 3);
+    let mut commands =
+        Vec::with_capacity(buffer.commands.len() + buffer.toolbox_miss_commands.len() + 4);
     if buffer.total > 0 {
         commands.push(serde_json::json!([
             "INCRBY",
@@ -285,6 +324,21 @@ fn flush_body(buffer: &Buffer, today: &str) -> serde_json::Value {
             command
         ]));
     }
+    if buffer.toolbox_misses > 0 {
+        commands.push(serde_json::json!([
+            "INCRBY",
+            TOOLBOX_MISSES_TOTAL_KEY,
+            buffer.toolbox_misses.to_string()
+        ]));
+    }
+    for (command, count) in &buffer.toolbox_miss_commands {
+        commands.push(serde_json::json!([
+            "ZINCRBY",
+            TOOLBOX_MISSES_COMMANDS_KEY,
+            count.to_string(),
+            command
+        ]));
+    }
     serde_json::Value::Array(commands)
 }
 
@@ -295,7 +349,7 @@ fn parse_snapshot(
     let entries = results
         .as_array()
         .ok_or("stats store returned no results")?;
-    if entries.len() != 2 + dates.len() {
+    if entries.len() != 4 + dates.len() {
         return Err("stats store returned an unexpected number of results".into());
     }
     let total = entries
@@ -303,28 +357,26 @@ fn parse_snapshot(
         .and_then(|entry| entry.get("result"))
         .and_then(value_as_u64)
         .unwrap_or(0);
-    let scores = entries
-        .get(1)
+    let top_commands = parse_command_counts(
+        entries
+            .get(1)
+            .and_then(|entry| entry.get("result"))
+            .ok_or("stats store returned no command scores")?,
+    )?;
+    let browser_toolbox_misses = entries
+        .get(2)
         .and_then(|entry| entry.get("result"))
-        .and_then(serde_json::Value::as_array)
-        .ok_or("stats store returned no command scores")?;
-    if scores.len() % 2 != 0 {
-        return Err("stats store returned malformed command scores".into());
-    }
-
-    let mut top_commands = Vec::with_capacity(scores.len() / 2);
-    for pair in scores.chunks_exact(2) {
-        let (Some(command), Some(count)) = (pair[0].as_str(), value_as_u64(&pair[1])) else {
-            return Err("stats store returned malformed command scores".into());
-        };
-        top_commands.push(CommandCount {
-            command: command.to_string(),
-            count,
-        });
-    }
+        .and_then(value_as_u64)
+        .unwrap_or(0);
+    let top_browser_toolbox_misses = parse_command_counts(
+        entries
+            .get(3)
+            .and_then(|entry| entry.get("result"))
+            .ok_or("stats store returned no toolbox-miss scores")?,
+    )?;
 
     let mut daily = Vec::with_capacity(dates.len());
-    for (entry, date) in entries[2..].iter().zip(dates) {
+    for (entry, date) in entries[4..].iter().zip(dates) {
         let Some(result) = entry.get("result") else {
             return Err("stats store returned a malformed daily count".into());
         };
@@ -337,9 +389,33 @@ fn parse_snapshot(
     Ok(StatsSnapshot {
         total,
         top_commands,
+        browser_toolbox_misses,
+        top_browser_toolbox_misses,
         daily,
         generated_at: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
     })
+}
+
+fn parse_command_counts(
+    value: &serde_json::Value,
+) -> Result<Vec<CommandCount>, Box<dyn std::error::Error + Send + Sync>> {
+    let scores = value
+        .as_array()
+        .ok_or("stats store returned no command scores")?;
+    if scores.len() % 2 != 0 {
+        return Err("stats store returned malformed command scores".into());
+    }
+    let mut commands = Vec::with_capacity(scores.len() / 2);
+    for pair in scores.chunks_exact(2) {
+        let (Some(command), Some(count)) = (pair[0].as_str(), value_as_u64(&pair[1])) else {
+            return Err("stats store returned malformed command scores".into());
+        };
+        commands.push(CommandCount {
+            command: command.to_string(),
+            count,
+        });
+    }
+    Ok(commands)
 }
 
 fn day_key(date: &str) -> String {
@@ -387,7 +463,7 @@ fn value_as_u64(value: &serde_json::Value) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{base_command, flush_body, parse_snapshot, utc_date, Buffer};
+    use super::{base_command, flush_body, parse_snapshot, utc_date, Buffer, StatsCollector};
     use std::collections::HashMap;
 
     #[test]
@@ -437,14 +513,41 @@ mod tests {
         let mut target = Buffer {
             total: 2,
             commands: HashMap::from([("find".to_string(), 2)]),
+            toolbox_misses: 1,
+            toolbox_miss_commands: HashMap::from([("rg".to_string(), 1)]),
         };
         target.merge(Buffer {
             total: 3,
             commands: HashMap::from([("find".to_string(), 1), ("git".to_string(), 2)]),
+            toolbox_misses: 2,
+            toolbox_miss_commands: HashMap::from([("rg".to_string(), 1), ("jq".to_string(), 1)]),
         });
         assert_eq!(target.total, 5);
         assert_eq!(target.commands["find"], 3);
         assert_eq!(target.commands["git"], 2);
+        assert_eq!(target.toolbox_misses, 3);
+        assert_eq!(target.toolbox_miss_commands["rg"], 2);
+        assert_eq!(target.toolbox_miss_commands["jq"], 1);
+    }
+
+    #[test]
+    fn toolbox_misses_retain_only_aggregate_base_commands() {
+        let collector = StatsCollector {
+            client: reqwest::Client::new(),
+            url: String::new(),
+            token: String::new(),
+            buffer: std::sync::Mutex::new(Buffer::default()),
+            cache: std::sync::Mutex::new(None),
+        };
+
+        collector.record_toolbox_miss("rg secret-value /private/path");
+
+        let buffer = collector.buffer.lock().expect("stats buffer lock");
+        assert_eq!(buffer.toolbox_misses, 1);
+        assert_eq!(
+            buffer.toolbox_miss_commands,
+            HashMap::from([("rg".to_string(), 1)])
+        );
     }
 
     #[test]
@@ -453,6 +556,8 @@ mod tests {
             &Buffer {
                 total: 2,
                 commands: HashMap::from([("find".to_string(), 2)]),
+                toolbox_misses: 3,
+                toolbox_miss_commands: HashMap::from([("rg".to_string(), 3)]),
             },
             "2026-07-20",
         );
@@ -462,7 +567,9 @@ mod tests {
                 ["INCRBY", "jst:stats:total", "2"],
                 ["INCRBY", "jst:stats:day:2026-07-20", "2"],
                 ["EXPIRE", "jst:stats:day:2026-07-20", "3456000"],
-                ["ZINCRBY", "jst:stats:commands", "2", "find"]
+                ["ZINCRBY", "jst:stats:commands", "2", "find"],
+                ["INCRBY", "jst:stats:toolbox-misses:total", "3"],
+                ["ZINCRBY", "jst:stats:toolbox-misses:commands", "3", "rg"]
             ])
         );
     }
@@ -474,6 +581,8 @@ mod tests {
             &serde_json::json!([
                 {"result": "42"},
                 {"result": ["find", "30", "git", 12]},
+                {"result": "5"},
+                {"result": ["rg", "4", "jq", 1]},
                 {"result": null},
                 {"result": "7"}
             ]),
@@ -484,6 +593,9 @@ mod tests {
         assert_eq!(snapshot.top_commands[0].command, "find");
         assert_eq!(snapshot.top_commands[0].count, 30);
         assert_eq!(snapshot.top_commands[1].count, 12);
+        assert_eq!(snapshot.browser_toolbox_misses, 5);
+        assert_eq!(snapshot.top_browser_toolbox_misses[0].command, "rg");
+        assert_eq!(snapshot.top_browser_toolbox_misses[0].count, 4);
         assert_eq!(
             snapshot.daily,
             vec![
@@ -501,10 +613,20 @@ mod tests {
 
     #[test]
     fn parses_empty_store() {
-        let snapshot = parse_snapshot(&serde_json::json!([{"result": null}, {"result": []}]), &[])
-            .expect("empty snapshot");
+        let snapshot = parse_snapshot(
+            &serde_json::json!([
+                {"result": null},
+                {"result": []},
+                {"result": null},
+                {"result": []}
+            ]),
+            &[],
+        )
+        .expect("empty snapshot");
         assert_eq!(snapshot.total, 0);
         assert!(snapshot.top_commands.is_empty());
+        assert_eq!(snapshot.browser_toolbox_misses, 0);
+        assert!(snapshot.top_browser_toolbox_misses.is_empty());
         assert!(snapshot.daily.is_empty());
     }
 
@@ -515,7 +637,9 @@ mod tests {
         assert!(parse_snapshot(
             &serde_json::json!([
                 {"result": "1"},
-                {"result": ["find"]}
+                {"result": ["find"]},
+                {"result": "0"},
+                {"result": []}
             ]),
             &[]
         )
@@ -523,6 +647,8 @@ mod tests {
         assert!(parse_snapshot(
             &serde_json::json!([
                 {"result": "1"},
+                {"result": []},
+                {"result": "0"},
                 {"result": []}
             ]),
             &["2026-07-20".to_string()]

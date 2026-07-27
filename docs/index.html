@@ -19,6 +19,7 @@
     <meta name="twitter:title" content="jst — shell commands from plain English" />
     <meta name="twitter:description" content="jst turns plain-English requests into shell commands and runs them." />
     <meta name="twitter:image" content="https://jst.sh/og.png" />
+    <link rel="canonical" href="https://jst.sh/" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="icon" type="image/x-icon" href="./favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
@@ -30,9 +31,9 @@
       href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Gabarito:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@300;400;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=3" />
-    <script src="./script.js?v=3" defer></script>
-    <script src="https://cdn.counter.dev/script.js" data-id="4fbcc31f-5f37-40c3-8788-8fb56c79209b" data-utcoffset="3"></script>
+    <link rel="stylesheet" href="./styles.css?v=23" />
+    <script type="module" src="./script.js?v=37"></script>
+    <script src="https://cdn.counter.dev/script.js" data-id="4fbcc31f-5f37-40c3-8788-8fb56c79209b" data-utcoffset="3" crossorigin="anonymous"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -62,7 +63,21 @@
           aria-label="jst turns the request find all files bigger than 500 megabytes in downloads into the shell command find downloads type file size plus 500 megabytes"
         >
           <svg class="translation-map" width="0" height="0" aria-hidden="true" focusable="false"></svg>
-          <div class="terminal-line terminal-line--request" aria-hidden="true">
+          <div class="terminal-chrome">
+            <span class="terminal-lights" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+            <span class="terminal-title" id="terminal-title" aria-hidden="true">jst / live demo</span>
+            <span class="terminal-runtime" id="terminal-runtime" aria-hidden="true">wasm · linux</span>
+            <span class="terminal-session-actions" id="terminal-session-actions" hidden>
+              <button class="terminal-control" id="demo-clear" type="button" title="Clear scrollback (Ctrl+L)">clear</button>
+              <span aria-hidden="true">·</span>
+              <button class="terminal-control" id="demo-reset" type="button" title="Reset the disposable filesystem">reset</button>
+            </span>
+          </div>
+          <div class="terminal-line terminal-line--request demo-example-request" aria-hidden="true">
             <span class="terminal-prompt">$</span>
             <code id="request">jst find all files bigger than 500 mb in ~/downloads</code>
             <span class="terminal-cursor"></span>
@@ -74,6 +89,47 @@
             <code id="result">find ~/downloads -type f -size +500M</code>
           </div>
 
+          <div class="demo-session" id="demo-session" hidden>
+            <div
+              class="demo-scrollback"
+              id="demo-scrollback"
+              role="log"
+              aria-live="polite"
+              aria-label="Terminal session output"
+              tabindex="0"
+            ></div>
+
+            <form class="demo-form" id="demo-form">
+              <label class="visually-hidden" for="demo-input">Tell JST what to do</label>
+              <span class="terminal-shell-prompt" aria-hidden="true">
+                <span class="terminal-user">guest@jst</span><span class="terminal-path">:~/playground</span><span class="terminal-prompt">$</span>
+              </span>
+              <code aria-hidden="true">jst</code>
+              <input
+                id="demo-input"
+                name="request"
+                type="text"
+                maxlength="280"
+                placeholder="what do you want to do?"
+                autocomplete="off"
+                autocapitalize="none"
+                spellcheck="false"
+              />
+              <button class="demo-submit" type="submit" aria-label="Translate and run in the sandbox" title="Run (Enter)">
+                <span class="demo-submit-arrow" aria-hidden="true">↵</span>
+              </button>
+            </form>
+
+            <div class="demo-session-footer">
+              <p class="demo-status" id="demo-status" aria-live="polite"></p>
+              <span class="demo-shortcuts" aria-hidden="true">↑↓ history · ctrl+l clear</span>
+            </div>
+          </div>
+
+          <button class="try-demo" type="button">
+            <span class="try-demo-label">try it now</span>
+            <span class="try-demo-arrow" aria-hidden="true">→</span>
+          </button>
           <button class="another-example" type="button" aria-label="Show another command example">
             another one <span aria-hidden="true">↻</span>
           </button>
@@ -251,8 +307,11 @@
 
     <footer class="site-footer wrap">
       <p class="footer-links">
-        <span><a href="https://x.com/yoavf">@yoavf</a> did this</span>
+        <span><a href="https://yoav.blog">@yoavf</a> did this</span>
         <span aria-hidden="true">·</span>
+        <a href="https://x.com/yoavf" aria-label="X (Twitter)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.657l-5.214-6.817-5.967 6.817H1.68l7.73-8.835L1.254 2.25h6.826l4.713 6.231 5.45-6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77Z"/></svg>
+        </a>
         <a href="https://github.com/yoavf" aria-label="GitHub">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         </a>
@@ -266,6 +325,26 @@
         <button class="footer-link" type="button" data-privacy-open aria-haspopup="dialog">Privacy</button>
       </p>
     </footer>
+
+    <dialog class="demo-dialog" id="demo-dialog" aria-labelledby="demo-dialog-title">
+      <section class="demo-dialog-sheet">
+        <header class="demo-dialog-header">
+          <div>
+            <p class="demo-dialog-kicker">browser playground / disposable session</p>
+            <h2 id="demo-dialog-title">Try <code>jst</code> for real.</h2>
+          </div>
+          <button
+            class="demo-dialog-close"
+            type="button"
+            data-demo-close
+            aria-label="Close the JST playground"
+          >
+            close <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="demo-dialog-mount" id="demo-dialog-mount"></div>
+      </section>
+    </dialog>
 
     <dialog class="privacy-dialog" id="privacy-dialog" aria-labelledby="privacy-title">
       <div class="privacy-sheet">
@@ -281,17 +360,17 @@
           </div>
           <div>
             <dt>What <code>jst</code> keeps</dt>
-            <dd>The <code>jst</code> app does not persist prompts, paths, arguments, or complete generated commands. Temporary in-memory hashes enforce rate limits. Aggregate stats keep totals and the base command name—like <code>find</code> or <code>git</code>—never its arguments.</dd>
+            <dd>The <code>jst</code> app does not persist prompts, paths, arguments, or complete generated commands. Temporary in-memory hashes enforce rate limits. Aggregate stats keep totals and the base command name—like <code>find</code> or <code>git</code>—never its arguments. Browser-toolbox misses are counted separately using only that same base command.</dd>
           </div>
           <div>
             <dt>This website</dt>
-            <dd>Counter.dev records anonymous aggregate visits such as pages viewed, country, browser, operating system, and screen size. The jst.sh site does not use advertising or any other trackers.</dd>
+            <dd>The interactive demo sends your words and a random ID stored in this browser to the hosted <code>jst</code> server. Its generated command runs in a disposable WebAssembly Linux sandbox with fake files, no access to your computer, and no guest network. Output stays in the page. Counter.dev records anonymous aggregate visits such as pages viewed, country, browser, operating system, and screen size. The jst.sh site does not use advertising or any other trackers.</dd>
           </div>
         </dl>
 
         <p class="privacy-advice"><span aria-hidden="true">✦</span> One sensible rule: don’t put passwords, keys, or other secrets in a prompt.</p>
         <div class="privacy-meta">
-          <p>Last updated July 23, 2026.</p>
+          <p>Last updated July 27, 2026.</p>
           <p><a href="https://openrouter.ai/privacy">OpenRouter</a> <span aria-hidden="true">·</span> <a href="https://counter.dev/pages/privacy.html">Counter.dev</a> <span aria-hidden="true">·</span> <a href="https://github.com/yoavf/jst">source</a></p>
         </div>
       </div>
