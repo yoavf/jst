@@ -24,6 +24,10 @@ test("starts the worker sandbox without requiring cross-origin isolation", () =>
   assert.doesNotMatch(pageScript, /if \(!window\.crossOriginIsolated\)/);
 });
 
+test("cache-busts the browser toolbox bundle after parser changes", () => {
+  assert.match(pageScript, /demo-command\.js\?v=4/);
+});
+
 test("hides the example switcher whenever the demo dialog is open", () => {
   assert.match(
     pageStyles,
@@ -73,4 +77,12 @@ test("labels the rotating hero as examples until the live sandbox opens", () => 
   assert.doesNotMatch(pageMarkup, />jst \/ live demo</);
   assert.match(pageScript, /terminalTitle\.textContent = "jst \/ live demo"/);
   assert.match(pageScript, /terminalRuntime\.textContent = "wasm · linux"/);
+});
+
+test("starts by explaining the already-rendered first example", () => {
+  assert.match(
+    pageScript,
+    /window\.requestAnimationFrame\(\(\) => \{\s*exampleIndex = 0;\s*explainRenderedExample\(exampleIndex\);/,
+  );
+  assert.match(pageScript, /animateExplanation\(example, run, false\)/);
 });

@@ -1,5 +1,5 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
-import { isAllowedDemoCommand } from "./assets/demo-command.js?v=3";
+import { isAllowedDemoCommand } from "./assets/demo-command.js?v=4";
 import { statsTotalSizeStep } from "./stats-display.js?v=1";
 
 const examples = [
@@ -289,22 +289,58 @@ function drawMap(map) {
   window.requestAnimationFrame(() => mapElement.classList.add("is-drawing"));
 }
 
-async function assembleResult(example, run) {
-  renderParts(resultElement, example.resultParts, "result-part");
-  resultLine.classList.add("is-visible");
-
+async function animateExplanation(example, run, revealResults) {
   for (const map of example.mapOrder) {
     if (run !== animationRun) return false;
     drawMap(map);
     await wait(80);
-    resultElement.querySelectorAll(`[data-map="${map}"]`).forEach((part) => {
-      part.classList.add("is-visible");
-    });
+    if (revealResults) {
+      resultElement.querySelectorAll(`[data-map="${map}"]`).forEach((part) => {
+        part.classList.add("is-visible");
+      });
+    }
     await wait(520);
   }
 
   clearMap();
   return true;
+}
+
+async function assembleResult(example, run) {
+  renderParts(resultElement, example.resultParts, "result-part");
+  resultLine.classList.add("is-visible");
+  return animateExplanation(example, run, true);
+}
+
+async function explainRenderedExample(index) {
+  const example = examples[index];
+  const request = exampleText(example.requestParts);
+  const result = exampleText(example.resultParts);
+  const run = ++animationRun;
+  translationElement.setAttribute(
+    "aria-label",
+    `JST turns ${request} into the shell command ${result}`,
+  );
+
+  stopSpinner();
+  translationElement.classList.remove("is-loading");
+  clearMap();
+  renderParts(requestElement, example.requestParts, "request-part");
+  renderParts(resultElement, example.resultParts, "result-part");
+  resultElement.querySelectorAll(".result-part").forEach((part) => {
+    part.classList.add("is-visible");
+  });
+  resultLine.classList.add("is-visible");
+  cursorElement.classList.add("is-hidden");
+
+  if (reduceMotion.matches) {
+    resetAutoRotate();
+    return;
+  }
+
+  await wait(220);
+  const explanationFinished = await animateExplanation(example, run, false);
+  if (explanationFinished) resetAutoRotate();
 }
 
 function resetAutoRotate() {
@@ -1090,7 +1126,7 @@ document.addEventListener("keydown", (event) => {
 
 window.requestAnimationFrame(() => {
   exampleIndex = 0;
-  showExample(exampleIndex, false);
+  explainRenderedExample(exampleIndex);
 });
 
 window.addEventListener("pagehide", () => {
