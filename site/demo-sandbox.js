@@ -399,7 +399,7 @@ if (isWorker) {
     }
 
     if (event.data?.type === "boot") {
-      worker = new Worker("/assets/demo-sandbox.js?v=13", { type: "module" });
+      worker = new Worker("/assets/demo-sandbox.js?v=14", { type: "module" });
       worker.addEventListener("message", (workerEvent) => {
         if (workerEvent.data?.type === "ready") workerReady = true;
         post(workerEvent.data);

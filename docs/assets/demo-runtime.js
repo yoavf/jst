@@ -4,7 +4,7 @@ var e = class {
 		this.frame = null, this.bootPromise = null, this.runReject = null, this.onProgress = e, this.channel = null, this.messageHandler = null;
 	}
 	boot() {
-		return this.bootPromise ? this.bootPromise : (this.channel = crypto.randomUUID(), this.frame = document.createElement("iframe"), this.frame.hidden = !0, this.frame.tabIndex = -1, this.frame.setAttribute("aria-hidden", "true"), this.frame.src = `/demo-sandbox.html#${this.channel}`, document.body.append(this.frame), this.bootPromise = new Promise((e, t) => {
+		return this.bootPromise ? this.bootPromise : (this.channel = crypto.randomUUID(), this.frame = document.createElement("iframe"), this.frame.hidden = !0, this.frame.tabIndex = -1, this.frame.setAttribute("aria-hidden", "true"), this.frame.src = `/demo-sandbox.html?v=14#${this.channel}`, document.body.append(this.frame), this.bootPromise = new Promise((e, t) => {
 			let n = !1, r = window.setTimeout(() => {
 				i(/* @__PURE__ */ Error("The sandbox took too long to start."));
 			}, 45e3), i = (e) => {

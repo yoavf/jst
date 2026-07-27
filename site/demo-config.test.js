@@ -4,10 +4,14 @@ import test from "node:test";
 import viteConfig from "../vite.config.js";
 import { statsTotalSizeStep } from "../docs/stats-display.js";
 
-const [pageScript, pageStyles] = await Promise.all([
+const [pageScript, pageStyles, runtimeBundle, sandboxBundle, sandboxMarkup] =
+  await Promise.all([
   readFile(new URL("../docs/script.js", import.meta.url), "utf8"),
   readFile(new URL("../docs/styles.css", import.meta.url), "utf8"),
-]);
+  readFile(new URL("../docs/assets/demo-runtime.js", import.meta.url), "utf8"),
+  readFile(new URL("../docs/assets/demo-sandbox.js", import.meta.url), "utf8"),
+  readFile(new URL("../docs/demo-sandbox.html", import.meta.url), "utf8"),
+  ]);
 const pageMarkup = await readFile(
   new URL("../docs/index.html", import.meta.url),
   "utf8",
@@ -24,8 +28,22 @@ test("starts the worker sandbox without requiring cross-origin isolation", () =>
   assert.doesNotMatch(pageScript, /if \(!window\.crossOriginIsolated\)/);
 });
 
-test("cache-busts the browser toolbox bundle after parser changes", () => {
-  assert.match(pageScript, /demo-command\.js\?v=4/);
+test("loads one versioned browser toolbox bundle in both page and worker", () => {
+  const pageImport = pageScript.match(/assets\/(demo-command-v\d+\.js)/);
+
+  assert.ok(pageImport, "page should import a versioned toolbox filename");
+  assert.match(
+    sandboxBundle,
+    new RegExp(`from "\\./${pageImport[1]}"`),
+    "worker should import the same versioned toolbox filename",
+  );
+});
+
+test("cache-busts every layer of the sandbox runtime", () => {
+  assert.match(pageScript, /demo-runtime\.js\?v=3/);
+  assert.match(runtimeBundle, /demo-sandbox\.html\?v=14/);
+  assert.match(sandboxMarkup, /demo-sandbox\.js\?v=14/);
+  assert.match(sandboxBundle, /demo-sandbox\.js\?v=14/);
 });
 
 test("hides the example switcher whenever the demo dialog is open", () => {

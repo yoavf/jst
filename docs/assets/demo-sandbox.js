@@ -1,4 +1,4 @@
-import { DEMO_STANDALONE_COMMANDS as e, parseDemoCommand as t } from "./demo-command.js";
+import { DEMO_STANDALONE_COMMANDS as e, parseDemoCommand as t } from "./demo-command-v5.js";
 var n = class e {
 	static read_bytes(t, n) {
 		let r = new e();
@@ -1301,7 +1301,7 @@ if (z) self.addEventListener("message", (e) => {
 else {
 	let e = null, t = !1;
 	window.addEventListener("message", (n) => {
-		n.source !== parent || n.origin !== location.origin || n.data?.channel !== B || (n.data?.type === "boot" ? (e = new Worker("/assets/demo-sandbox.js?v=13", { type: "module" }), e.addEventListener("message", (e) => {
+		n.source !== parent || n.origin !== location.origin || n.data?.channel !== B || (n.data?.type === "boot" ? (e = new Worker("/assets/demo-sandbox.js?v=14", { type: "module" }), e.addEventListener("message", (e) => {
 			e.data?.type === "ready" && (t = !0), W(e.data);
 		}), e.addEventListener("error", () => {
 			W({

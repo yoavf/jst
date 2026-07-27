@@ -20,7 +20,7 @@ export class DemoRuntime {
     this.frame.hidden = true;
     this.frame.tabIndex = -1;
     this.frame.setAttribute("aria-hidden", "true");
-    this.frame.src = `/demo-sandbox.html#${this.channel}`;
+    this.frame.src = `/demo-sandbox.html?v=14#${this.channel}`;
     document.body.append(this.frame);
 
     this.bootPromise = new Promise((resolve, reject) => {

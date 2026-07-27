@@ -1,5 +1,5 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
-import { isAllowedDemoCommand } from "./assets/demo-command.js?v=4";
+import { isAllowedDemoCommand } from "./assets/demo-command-v5.js";
 import { statsTotalSizeStep } from "./stats-display.js?v=1";
 
 const examples = [
@@ -745,7 +745,7 @@ async function activateDemo() {
   demoStatus.textContent = "";
 
   try {
-    const { DemoRuntime } = await import("./assets/demo-runtime.js?v=2");
+    const { DemoRuntime } = await import("./assets/demo-runtime.js?v=3");
     demoRuntime?.destroy();
     demoRuntime = new DemoRuntime({ onProgress: reportSandboxProgress });
     await demoRuntime.boot();
