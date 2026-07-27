@@ -47,6 +47,24 @@ test("ships the additional examples returned by the JST CLI", () => {
   assert.match(pageScript, /du -h --max-depth=1/);
   assert.match(pageScript, /for file in /);
   assert.match(pageScript, /screenshots\/\*\.png/);
+  assert.match(pageScript, /openssl rand/);
+  assert.match(pageScript, /cut -c1-32/);
+});
+
+test("leads with the most interesting examples and omits the expenses search", () => {
+  const imageConversion = pageScript.indexOf("turn every png");
+  const secretGeneration = pageScript.indexOf("generate a");
+  const processSorting = pageScript.indexOf("show the five");
+  const folderSizing = pageScript.indexOf("show the ten");
+  const rustSearch = pageScript.indexOf("find all rust files");
+  const largestFiles = pageScript.indexOf("show the 10");
+
+  assert.ok(imageConversion < secretGeneration);
+  assert.ok(secretGeneration < processSorting);
+  assert.ok(processSorting < folderSizing);
+  assert.ok(folderSizing < rustSearch);
+  assert.ok(rustSearch < largestFiles);
+  assert.doesNotMatch(pageScript, /expenses\.csv|mentioning hosting/);
 });
 
 test("labels the rotating hero as examples until the live sandbox opens", () => {

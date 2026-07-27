@@ -6,54 +6,33 @@ const examples = [
   {
     requestParts: [
       { text: "jst " },
-      { text: "find all rust files", map: "files" },
-      { text: " in projects", map: "place" },
+      { text: "turn every png", map: "source" },
+      { text: " in screenshots", map: "place" },
+      { text: " into a webp", map: "format" },
     ],
     resultParts: [
-      { text: "find", map: "files" },
-      { text: " projects", map: "place" },
-      { text: " -type f", map: "files" },
-      { text: " -name '*.rs'", map: "files" },
+      { text: "for file in ", map: "source" },
+      { text: "screenshots/*.png", map: "place" },
+      { text: '; do cwebp "$file"', map: "source" },
+      { text: ' -o "${file%.png}.webp"', map: "format" },
+      { text: "; done", map: "source" },
     ],
-    mapOrder: ["files", "place"],
+    mapOrder: ["source", "place", "format"],
   },
   {
     requestParts: [
       { text: "jst " },
-      { text: "show lines mentioning hosting", map: "search" },
-      { text: " in downloads/expenses.csv", map: "file" },
+      { text: "generate a", map: "action" },
+      { text: " 32 character long", map: "length" },
+      { text: " secret", map: "kind" },
     ],
     resultParts: [
-      { text: "grep hosting", map: "search" },
-      { text: " downloads/expenses.csv", map: "file" },
+      { text: "openssl rand", map: "action" },
+      { text: " -base64 24", map: "kind" },
+      { text: " | tr -d '='", map: "length" },
+      { text: " | cut -c1-32", map: "length" },
     ],
-    mapOrder: ["search", "file"],
-  },
-  {
-    requestParts: [
-      { text: "jst " },
-      { text: "show the 10", map: "limit" },
-      { text: " largest", map: "sort" },
-      { text: " files in this folder", map: "measure" },
-    ],
-    resultParts: [
-      { text: "ls -lh", map: "measure" },
-      { text: "S", map: "sort" },
-      { text: " | head -n 10", map: "limit" },
-    ],
-    mapOrder: ["limit", "sort", "measure"],
-  },
-  {
-    requestParts: [
-      { text: "jst " },
-      { text: "checksum", map: "action" },
-      { text: " the README", map: "file" },
-    ],
-    resultParts: [
-      { text: "sha256sum", map: "action" },
-      { text: " README.md", map: "file" },
-    ],
-    mapOrder: ["action", "file"],
+    mapOrder: ["action", "length", "kind"],
   },
   {
     requestParts: [
@@ -86,18 +65,42 @@ const examples = [
   {
     requestParts: [
       { text: "jst " },
-      { text: "turn every png", map: "source" },
-      { text: " in screenshots", map: "place" },
-      { text: " into a webp", map: "format" },
+      { text: "find all rust files", map: "files" },
+      { text: " in projects", map: "place" },
     ],
     resultParts: [
-      { text: "for file in ", map: "source" },
-      { text: "screenshots/*.png", map: "place" },
-      { text: '; do cwebp "$file"', map: "source" },
-      { text: ' -o "${file%.png}.webp"', map: "format" },
-      { text: "; done", map: "source" },
+      { text: "find", map: "files" },
+      { text: " projects", map: "place" },
+      { text: " -type f", map: "files" },
+      { text: " -name '*.rs'", map: "files" },
     ],
-    mapOrder: ["source", "place", "format"],
+    mapOrder: ["files", "place"],
+  },
+  {
+    requestParts: [
+      { text: "jst " },
+      { text: "show the 10", map: "limit" },
+      { text: " largest", map: "sort" },
+      { text: " files in this folder", map: "measure" },
+    ],
+    resultParts: [
+      { text: "ls -lh", map: "measure" },
+      { text: "S", map: "sort" },
+      { text: " | head -n 10", map: "limit" },
+    ],
+    mapOrder: ["limit", "sort", "measure"],
+  },
+  {
+    requestParts: [
+      { text: "jst " },
+      { text: "checksum", map: "action" },
+      { text: " the README", map: "file" },
+    ],
+    resultParts: [
+      { text: "sha256sum", map: "action" },
+      { text: " README.md", map: "file" },
+    ],
+    mapOrder: ["action", "file"],
   },
 ];
 

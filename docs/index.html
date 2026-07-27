@@ -32,7 +32,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css?v=24" />
-    <script type="module" src="./script.js?v=38"></script>
+    <script type="module" src="./script.js?v=40"></script>
     <script src="https://cdn.counter.dev/script.js" data-id="4fbcc31f-5f37-40c3-8788-8fb56c79209b" data-utcoffset="3" crossorigin="anonymous"></script>
   </head>
   <body>
@@ -60,7 +60,7 @@
         </div>
         <div
           class="translation"
-          aria-label="jst turns the request find all files bigger than 500 megabytes in downloads into the shell command find downloads type file size plus 500 megabytes"
+          aria-label="jst turns the request turn every png in screenshots into a webp into a shell loop using cwebp"
         >
           <svg class="translation-map" width="0" height="0" aria-hidden="true" focusable="false"></svg>
           <div class="terminal-chrome">
@@ -79,14 +79,14 @@
           </div>
           <div class="terminal-line terminal-line--request demo-example-request" aria-hidden="true">
             <span class="terminal-prompt">$</span>
-            <code id="request">jst find all files bigger than 500 mb in ~/downloads</code>
+            <code id="request">jst turn every png in screenshots into a webp</code>
             <span class="terminal-cursor"></span>
           </div>
 
           <div class="terminal-line terminal-line--result is-visible" aria-hidden="true">
             <span class="terminal-output">→</span>
             <span class="terminal-spinner" aria-hidden="true"></span>
-            <code id="result">find ~/downloads -type f -size +500M</code>
+            <code id="result">for file in screenshots/*.png; do cwebp "$file" -o "${file%.png}.webp"; done</code>
           </div>
 
           <div class="demo-session" id="demo-session" hidden>
