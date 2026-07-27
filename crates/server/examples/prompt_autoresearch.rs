@@ -1205,7 +1205,7 @@ fn check_mac_top_memory_processes(command: &str, limit: usize) -> Vec<CheckResul
     let lower = command.to_ascii_lowercase();
     vec![
         check("uses ps", contains_word(&lower, "ps")),
-        check("avoids GNU ps sorting", !lower.contains("ps aux --sort")),
+        check("avoids GNU ps sorting", !lower.contains("--sort")),
         check(
             "sorts by the ps memory column",
             lower.contains("sort")
@@ -1248,9 +1248,14 @@ fn has_reverse_numeric_sort(command: &str) -> bool {
 }
 
 fn has_head_limit(command: &str, limit: usize) -> bool {
-    command.contains(&format!("head -n {limit}"))
-        || command.contains(&format!("head -n{limit}"))
-        || command.contains(&format!("head -{limit}"))
+    let words: Vec<_> = command.split_whitespace().collect();
+    words
+        .windows(3)
+        .any(|words| words[0] == "head" && words[1] == "-n" && words[2] == limit.to_string())
+        || words.windows(2).any(|words| {
+            words[0] == "head"
+                && (words[1] == format!("-n{limit}") || words[1] == format!("-{limit}"))
+        })
 }
 
 fn check_mac_direct_today(command: &str) -> Vec<CheckResult> {
@@ -1983,6 +1988,22 @@ mod tests {
         );
         assert!(
             check_mac_top_memory_processes("ps aux --sort=-%mem | head -n 6", 5)
+                .iter()
+                .any(|check| !check.passed)
+        );
+        assert!(check_mac_top_memory_processes(
+            "ps aux -ww --sort=-%mem | sort -nrk 4 | head -n 5",
+            5,
+        )
+        .iter()
+        .any(|check| !check.passed));
+        assert!(
+            check_mac_top_memory_processes("ps aux | sort -nrk 4 | head -n 30", 3)
+                .iter()
+                .any(|check| !check.passed)
+        );
+        assert!(
+            check_mac_top_memory_processes("ps aux | sort -nrk 4 | head -30", 3)
                 .iter()
                 .any(|check| !check.passed)
         );
