@@ -1,5 +1,6 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
 import { isAllowedDemoCommand } from "./assets/demo-command.js?v=3";
+import { statsTotalSizeStep } from "./stats-display.js?v=1";
 
 const examples = [
   {
@@ -53,6 +54,50 @@ const examples = [
       { text: " README.md", map: "file" },
     ],
     mapOrder: ["action", "file"],
+  },
+  {
+    requestParts: [
+      { text: "jst " },
+      { text: "show the five", map: "limit" },
+      { text: " processes", map: "target" },
+      { text: " using the most memory", map: "sort" },
+    ],
+    resultParts: [
+      { text: "ps aux", map: "target" },
+      { text: " --sort=-%mem", map: "sort" },
+      { text: " | head -n 6", map: "limit" },
+    ],
+    mapOrder: ["limit", "target", "sort"],
+  },
+  {
+    requestParts: [
+      { text: "jst " },
+      { text: "show the ten", map: "limit" },
+      { text: " folders here", map: "target" },
+      { text: " taking the most space", map: "sort" },
+    ],
+    resultParts: [
+      { text: "du -h --max-depth=1", map: "target" },
+      { text: " | sort -hr", map: "sort" },
+      { text: " | head -n 10", map: "limit" },
+    ],
+    mapOrder: ["limit", "target", "sort"],
+  },
+  {
+    requestParts: [
+      { text: "jst " },
+      { text: "turn every png", map: "source" },
+      { text: " in screenshots", map: "place" },
+      { text: " into a webp", map: "format" },
+    ],
+    resultParts: [
+      { text: "for file in ", map: "source" },
+      { text: "screenshots/*.png", map: "place" },
+      { text: '; do cwebp "$file"', map: "source" },
+      { text: ' -o "${file%.png}.webp"', map: "format" },
+      { text: "; done", map: "source" },
+    ],
+    mapOrder: ["source", "place", "format"],
   },
 ];
 
@@ -609,7 +654,8 @@ function restoreDemoPreview() {
   demoSession.hidden = true;
   demoScrollback.replaceChildren();
   exampleRequestLine.hidden = false;
-  terminalTitle.textContent = "jst / live demo";
+  terminalTitle.textContent = "jst / examples";
+  terminalRuntime.textContent = "plain english → shell";
   terminalRuntime.hidden = false;
   terminalSessionActions.hidden = true;
   tryDemoButton.disabled = false;
@@ -638,6 +684,9 @@ async function activateDemo() {
   if (!tryDemoButton || !demoForm) return;
 
   openDemoDialog();
+  terminalTitle.textContent = "jst / live demo";
+  terminalRuntime.textContent = "wasm · linux";
+  terminalRuntime.hidden = false;
   const activationRun = ++demoActivationRun;
   if (autoRotateTimer) {
     clearTimeout(autoRotateTimer);
@@ -1117,7 +1166,9 @@ async function loadStats() {
   if (!response.ok) throw new Error(`stats returned ${response.status}`);
   const stats = await response.json();
 
-  statsTotalElement.textContent = formatNumber(stats.total);
+  const formattedTotal = formatNumber(stats.total);
+  statsTotalElement.textContent = formattedTotal;
+  statsTotalElement.dataset.sizeStep = statsTotalSizeStep(formattedTotal);
 
   const top = (stats.top_commands || []).slice(0, MAX_COMMAND_BARS);
   if (top.length > 0) {

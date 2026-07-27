@@ -1853,7 +1853,9 @@ h3 {
 
 .stats-total-heading {
   display: flex;
+  min-width: 0;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: clamp(0.8rem, 2vw, 1.5rem);
 }
 
@@ -1875,6 +1877,27 @@ h3 {
   text-shadow: 1px 1px 0 rgb(12 46 131 / 16%);
   transform: rotate(-1.2deg);
   width: fit-content;
+  white-space: nowrap;
+}
+
+.stats-number[data-size-step="1"] {
+  font-size: clamp(4.05rem, 9.9vw, 9rem);
+}
+
+.stats-number[data-size-step="2"] {
+  font-size: clamp(3.6rem, 8.8vw, 8rem);
+}
+
+.stats-number[data-size-step="3"] {
+  font-size: clamp(3.15rem, 7.7vw, 7rem);
+}
+
+.stats-number[data-size-step="4"] {
+  font-size: clamp(2.7rem, 6.6vw, 6rem);
+}
+
+.stats-number[data-size-step="5"] {
+  font-size: clamp(2.25rem, 5.5vw, 5rem);
 }
 
 .stats-caption {
