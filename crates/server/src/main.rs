@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 use tracing::{error, info};
@@ -19,8 +20,83 @@ const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024;
 const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
+const MAX_DEMO_INPUT_BYTES: usize = 280;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
 const RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(2);
+const DEFAULT_DEMO_ALLOWED_ORIGIN: &str = "https://jst.sh";
+const DEMO_COMMANDS: &[&str] = &[
+    "arch",
+    "b2sum",
+    "base32",
+    "base64",
+    "basename",
+    "basenc",
+    "cat",
+    "cksum",
+    "cmp",
+    "column",
+    "comm",
+    "cp",
+    "cut",
+    "date",
+    "diff",
+    "dir",
+    "dircolors",
+    "dirname",
+    "echo",
+    "expand",
+    "factor",
+    "false",
+    "find",
+    "fmt",
+    "fold",
+    "grep",
+    "head",
+    "join",
+    "link",
+    "ln",
+    "ls",
+    "md5sum",
+    "mkdir",
+    "mktemp",
+    "mv",
+    "nl",
+    "nproc",
+    "numfmt",
+    "od",
+    "paste",
+    "pathchk",
+    "pr",
+    "printenv",
+    "printf",
+    "ptx",
+    "pwd",
+    "readlink",
+    "realpath",
+    "rm",
+    "rmdir",
+    "seq",
+    "sha1sum",
+    "sha224sum",
+    "sha256sum",
+    "sha384sum",
+    "sha512sum",
+    "shuf",
+    "sort",
+    "sum",
+    "tail",
+    "touch",
+    "tr",
+    "true",
+    "tsort",
+    "tty",
+    "uname",
+    "unexpand",
+    "uniq",
+    "unlink",
+    "vdir",
+    "wc",
+];
 
 #[derive(Clone)]
 struct AppState {
@@ -31,7 +107,24 @@ struct AppState {
     llm_fallback_model: Option<String>,
     translation_slots: Arc<Semaphore>,
     rate_limits: Arc<rate_limit::RateLimits>,
+    demo_rate_limits: Arc<rate_limit::RateLimits>,
+    demo_allowed_origins: Arc<Vec<String>>,
     stats: Option<Arc<stats::StatsCollector>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DemoRequest {
+    input: String,
+    os: String,
+    #[serde(default)]
+    interactive: bool,
+}
+
+#[derive(Serialize)]
+struct DemoCommandErrorResponse {
+    error: &'static str,
+    command: String,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -93,6 +186,21 @@ async fn main() {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(100_000);
+    let demo_monthly_request_limit = env_u32("DEMO_MONTHLY_REQUEST_LIMIT", 100);
+    let demo_requests_per_minute = env_u32("DEMO_REQUESTS_PER_MINUTE", 6);
+    let demo_daily_requests_per_ip = env_u32("DEMO_DAILY_REQUESTS_PER_IP", 60);
+    let demo_global_daily_request_limit = env_u32("DEMO_GLOBAL_DAILY_REQUEST_LIMIT", 1_000);
+    let demo_allowed_origins = std::env::var("DEMO_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| DEFAULT_DEMO_ALLOWED_ORIGIN.to_string())
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert!(
+        !demo_allowed_origins.is_empty(),
+        "DEMO_ALLOWED_ORIGINS must contain at least one origin"
+    );
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
@@ -109,6 +217,17 @@ async fn main() {
             max_client_entries: max_tracked_installations,
         },
     ));
+    let demo_rate_limits = Arc::new(rate_limit::RateLimits::from_env_scoped(
+        &client,
+        rate_limit::Config {
+            monthly_limit: demo_monthly_request_limit,
+            minute_limit: demo_requests_per_minute,
+            daily_ip_limit: demo_daily_requests_per_ip,
+            global_daily_limit: demo_global_daily_request_limit,
+            max_client_entries: max_tracked_installations,
+        },
+        "demo",
+    ));
     let stats = stats::StatsCollector::from_env(&client);
     if let Some(collector) = stats.clone() {
         tokio::spawn(collector.flush_loop());
@@ -121,6 +240,8 @@ async fn main() {
         llm_fallback_model,
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
         rate_limits,
+        demo_rate_limits,
+        demo_allowed_origins: Arc::new(demo_allowed_origins),
         stats: stats.clone(),
     };
 
@@ -129,6 +250,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/status", get(server_status))
         .route("/translate", post(translate))
+        .route("/demo", post(demo).options(demo_options))
         .route("/stats", get(usage_stats))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(state);
@@ -153,7 +275,14 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn server_status(State(state): State<AppState>) -> Json<ServerStatusResponse> {
+fn env_u32(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(default)
+}
+
+async fn server_status(State(state): State<AppState>) -> Response {
     let usage = if let Some(stats) = &state.stats {
         match tokio::time::timeout(STATUS_STATS_TIMEOUT, stats.snapshot()).await {
             Ok(Ok(snapshot)) => Some(status_usage(&snapshot)),
@@ -170,12 +299,17 @@ async fn server_status(State(state): State<AppState>) -> Json<ServerStatusRespon
         None
     };
 
-    Json(ServerStatusResponse {
+    let mut response = Json(ServerStatusResponse {
         status: "ok".to_string(),
         model: state.llm_model,
         fallback_model: state.llm_fallback_model,
         usage,
     })
+    .into_response();
+    response
+        .headers_mut()
+        .insert("access-control-allow-origin", HeaderValue::from_static("*"));
+    response
 }
 
 fn status_usage(snapshot: &stats::StatsSnapshot) -> StatusUsage {
@@ -215,6 +349,71 @@ async fn usage_stats(State(state): State<AppState>) -> Response {
     response
 }
 
+async fn demo_options(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let Ok(origin) = allowed_demo_origin(&headers, &state.demo_allowed_origins) else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    demo_cors(StatusCode::NO_CONTENT.into_response(), origin)
+}
+
+async fn demo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<DemoRequest>,
+) -> Response {
+    let origin = match allowed_demo_origin(&headers, &state.demo_allowed_origins) {
+        Ok(origin) => origin.to_string(),
+        Err(message) => return bad_request_with_status(StatusCode::FORBIDDEN, message),
+    };
+    let response = demo_inner(&state, &headers, req).await;
+    demo_cors(response, &origin)
+}
+
+async fn demo_inner(state: &AppState, headers: &HeaderMap, req: DemoRequest) -> Response {
+    if let Err(message) = validate_demo_request(&req) {
+        return bad_request(message);
+    }
+
+    let installation_fingerprint = if state.demo_rate_limits.client_limits_enabled() {
+        match request_browser_fingerprint(headers) {
+            Ok(fingerprint) => Some(fingerprint),
+            Err(message) => return bad_request(message),
+        }
+    } else {
+        None
+    };
+    let address_fingerprint = if state.demo_rate_limits.ip_limits_enabled() {
+        match request_address_fingerprint(headers) {
+            Ok(fingerprint) => fingerprint.map(|value| format!("demo:{value}")),
+            Err(message) => return bad_request(message),
+        }
+    } else {
+        None
+    };
+    let shell = match req.os.as_str() {
+        "windows" => "powershell",
+        "macos" | "ios" => "zsh",
+        _ => "bash",
+    };
+    let translate_request = TranslateRequest {
+        input: req.input,
+        os: Some(req.os),
+        shell: Some(shell.to_string()),
+        explain: req.interactive,
+        revision: None,
+    };
+
+    translate_with_limits(
+        state,
+        &state.demo_rate_limits,
+        installation_fingerprint,
+        address_fingerprint,
+        &translate_request,
+        true,
+    )
+    .await
+}
+
 async fn translate(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -238,15 +437,32 @@ async fn translate(
         Ok(fingerprints) => fingerprints,
         Err(message) => return bad_request(message),
     };
+    translate_with_limits(
+        &state,
+        &state.rate_limits,
+        installation_fingerprint,
+        address_fingerprint,
+        &req,
+        false,
+    )
+    .await
+}
+
+async fn translate_with_limits(
+    state: &AppState,
+    rate_limits: &rate_limit::RateLimits,
+    installation_fingerprint: Option<String>,
+    address_fingerprint: Option<String>,
+    req: &TranslateRequest,
+    reject_unsafe_display: bool,
+) -> Response {
     let client_fingerprint = address_fingerprint
         .as_deref()
         .or(installation_fingerprint.as_deref())
         .unwrap_or("");
     let decisions = match tokio::time::timeout(
         RATE_LIMIT_TIMEOUT,
-        state
-            .rate_limits
-            .check(installation_fingerprint.as_deref(), client_fingerprint),
+        rate_limits.check(installation_fingerprint.as_deref(), client_fingerprint),
     )
     .await
     {
@@ -321,17 +537,60 @@ async fn translate(
         return with_usage_headers(busy_response(), usage);
     };
 
-    let response = match openai_compatible::translate(
-        &state.client,
-        &state.llm_api_url,
-        &state.llm_api_key,
-        &state.llm_model,
-        state.llm_fallback_model.as_deref(),
-        &req,
-    )
-    .await
-    {
+    let translation = if reject_unsafe_display {
+        openai_compatible::translate_demo(
+            &state.client,
+            &state.llm_api_url,
+            &state.llm_api_key,
+            &state.llm_model,
+            state.llm_fallback_model.as_deref(),
+            req,
+        )
+        .await
+    } else {
+        openai_compatible::translate(
+            &state.client,
+            &state.llm_api_url,
+            &state.llm_api_key,
+            &state.llm_model,
+            state.llm_fallback_model.as_deref(),
+            req,
+        )
+        .await
+    };
+
+    let response = match translation {
         Ok(response) => {
+            if reject_unsafe_display && response.command.chars().any(is_unsafe_terminal_character) {
+                error!("Demo translation contained unsafe display characters");
+                return with_usage_headers(
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        Json(ErrorResponse {
+                            error: "the generated preview could not be displayed safely; try a different request"
+                                .to_string(),
+                        }),
+                    )
+                        .into_response(),
+                    usage,
+                );
+            }
+            if reject_unsafe_display && !is_allowed_demo_command(&response.command) {
+                if let Some(stats) = &state.stats {
+                    stats.record_toolbox_miss(&response.command);
+                }
+                return with_usage_headers(
+                    (
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(DemoCommandErrorResponse {
+                            error: "Not in the browser toolbox yet — but now we know what to add.",
+                            command: response.command,
+                        }),
+                    )
+                        .into_response(),
+                    usage,
+                );
+            }
             if let Some(stats) = &state.stats {
                 stats.record(&response.command);
             }
@@ -366,13 +625,57 @@ fn check_decision(
 }
 
 fn bad_request(message: &str) -> Response {
+    bad_request_with_status(StatusCode::BAD_REQUEST, message)
+}
+
+fn bad_request_with_status(status: StatusCode, message: &str) -> Response {
     (
-        StatusCode::BAD_REQUEST,
+        status,
         Json(ErrorResponse {
             error: message.to_string(),
         }),
     )
         .into_response()
+}
+
+fn allowed_demo_origin<'a>(
+    headers: &'a HeaderMap,
+    allowed_origins: &[String],
+) -> Result<&'a str, &'static str> {
+    let origin = headers
+        .get("origin")
+        .ok_or("demo requests must come from the JST website")?
+        .to_str()
+        .map_err(|_| "invalid request origin")?;
+    if allowed_origins.iter().any(|allowed| allowed == origin) {
+        Ok(origin)
+    } else {
+        Err("demo requests must come from the JST website")
+    }
+}
+
+fn demo_cors(mut response: Response, origin: &str) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(
+        "access-control-allow-origin",
+        HeaderValue::from_str(origin).expect("validated demo origin"),
+    );
+    headers.insert(
+        "access-control-allow-methods",
+        HeaderValue::from_static("POST, OPTIONS"),
+    );
+    headers.insert(
+        "access-control-allow-headers",
+        HeaderValue::from_static("content-type, x-jst-browser-id"),
+    );
+    headers.insert(
+        "access-control-expose-headers",
+        HeaderValue::from_static(
+            "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-minute-limit, x-ratelimit-minute-remaining",
+        ),
+    );
+    headers.insert("vary", HeaderValue::from_static("Origin"));
+    response
 }
 
 fn busy_response() -> Response {
@@ -445,6 +748,19 @@ fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
     }
 
     Err("missing JST installation ID")
+}
+
+fn request_browser_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
+    let value = headers
+        .get("x-jst-browser-id")
+        .ok_or("missing JST browser ID")?
+        .to_str()
+        .map_err(|_| "invalid JST browser ID")?;
+    if is_installation_id(value) {
+        Ok(format!("demo:browser:{value}"))
+    } else {
+        Err("invalid JST browser ID")
+    }
 }
 
 fn is_installation_id(value: &str) -> bool {
@@ -544,6 +860,203 @@ fn validate_request(request: &TranslateRequest) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn validate_demo_request(request: &DemoRequest) -> Result<(), &'static str> {
+    if request.input.trim().is_empty()
+        || request.input.len() > MAX_DEMO_INPUT_BYTES
+        || request.input.chars().any(is_unsafe_terminal_character)
+    {
+        return Err("demo request must contain 1–280 safe bytes on one line");
+    }
+    if !matches!(
+        request.os.as_str(),
+        "android" | "ios" | "linux" | "macos" | "windows"
+    ) {
+        return Err("demo operating system is not supported");
+    }
+    Ok(())
+}
+
+fn is_allowed_demo_command(command: &str) -> bool {
+    if is_allowed_demo_for_each_cat(command) {
+        return true;
+    }
+    if command.trim().is_empty()
+        || command.contains("||")
+        || command.chars().any(|character| {
+            character.is_control()
+                || matches!(
+                    character,
+                    '\\' | '`' | ';' | '&' | '$' | '(' | ')' | '{' | '}' | '!' | '#'
+                )
+        })
+    {
+        return false;
+    }
+
+    let segments = command.split('|').collect::<Vec<_>>();
+    segments.iter().enumerate().all(|(index, segment)| {
+        let segment = segment.trim();
+        let Some(words) = parse_demo_words(segment) else {
+            return false;
+        };
+        let Some(command_words) =
+            split_demo_redirections(&words, index == segments.len().saturating_sub(1))
+        else {
+            return false;
+        };
+        let Some((name, arguments)) = command_words.split_first() else {
+            return false;
+        };
+        name.chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+            && DEMO_COMMANDS.binary_search(&name.as_str()).is_ok()
+            && !has_unsafe_demo_arguments(name, arguments)
+    })
+}
+
+fn is_allowed_demo_for_each_cat(command: &str) -> bool {
+    let Some(rest) = command.trim().strip_prefix("for ") else {
+        return false;
+    };
+    let Some((variable, rest)) = rest.split_once(" in ") else {
+        return false;
+    };
+    if variable.is_empty()
+        || !variable.chars().enumerate().all(|(index, character)| {
+            character == '_'
+                || character.is_ascii_alphanumeric()
+                    && (index > 0 || character.is_ascii_alphabetic())
+        })
+    {
+        return false;
+    }
+    let Some((glob, suffix)) = rest.split_once("; do cat \"$") else {
+        return false;
+    };
+    if suffix != format!("{variable}\"; done") {
+        return false;
+    }
+    let components = glob.split('/').collect::<Vec<_>>();
+    glob.chars().filter(|character| *character == '*').count() == 1
+        && glob
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-/*".contains(character))
+        && is_safe_demo_path(glob)
+        && components
+            .iter()
+            .take(components.len().saturating_sub(1))
+            .all(|component| !component.contains('*'))
+}
+
+fn split_demo_redirections(words: &[String], is_final_segment: bool) -> Option<Vec<String>> {
+    if words.iter().any(|word| {
+        (word.contains('<') && word.as_str() != "<") || (word.contains('>') && word.as_str() != ">")
+    }) {
+        return None;
+    }
+
+    let mut command_words = Vec::with_capacity(words.len());
+    let mut has_input = false;
+    let mut has_output = false;
+    let mut index = 0;
+    while index < words.len() {
+        let word = &words[index];
+        if word != "<" && word != ">" {
+            command_words.push(word.clone());
+            index += 1;
+            continue;
+        }
+
+        let is_output = word == ">";
+        let path = words.get(index + 1)?;
+        if command_words.is_empty()
+            || matches!(path.as_str(), "<" | ">")
+            || !is_safe_demo_path(path)
+            || (is_output && (has_output || !is_final_segment))
+            || (!is_output && has_input)
+        {
+            return None;
+        }
+        if is_output {
+            has_output = true;
+        } else {
+            has_input = true;
+        }
+        index += 2;
+    }
+    Some(command_words)
+}
+
+fn is_safe_demo_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && path
+            .split('/')
+            .all(|component| !component.is_empty() && component != "..")
+}
+
+fn parse_demo_words(segment: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut started = false;
+    for character in segment.chars() {
+        if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
+            } else {
+                word.push(character);
+            }
+        } else if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            started = true;
+        } else if character.is_whitespace() {
+            if started {
+                words.push(std::mem::take(&mut word));
+                started = false;
+            }
+        } else {
+            word.push(character);
+            started = true;
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if started {
+        words.push(word);
+    }
+    Some(words)
+}
+
+fn has_unsafe_demo_arguments(name: &str, arguments: &[String]) -> bool {
+    match name {
+        "find" => arguments.iter().any(|argument| {
+            matches!(
+                argument.as_str(),
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-fls"
+                    | "-fprint"
+                    | "-fprint0"
+                    | "-fprintf"
+                    | "-ok"
+                    | "-okdir"
+            )
+        }),
+        "sort" => arguments.iter().any(|argument| {
+            argument == "-o"
+                || argument.starts_with("-o")
+                || argument == "--output"
+                || argument.starts_with("--output=")
+                || argument == "--compress-program"
+                || argument.starts_with("--compress-program=")
+        }),
+        _ => false,
+    }
+}
+
 fn is_unsafe_terminal_character(character: char) -> bool {
     character.is_control()
         || matches!(
@@ -583,8 +1096,10 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        request_fingerprint, request_limit_fingerprints, status_usage, translate, validate_request,
-        with_usage_headers, AppState, UsageHeaders,
+        allowed_demo_origin, is_allowed_demo_command, request_browser_fingerprint,
+        request_fingerprint, request_limit_fingerprints, status_usage, translate,
+        validate_demo_request, validate_request, with_usage_headers, AppState, DemoRequest,
+        UsageHeaders,
     };
     use axum::{
         extract::State,
@@ -634,6 +1149,85 @@ mod tests {
     }
 
     #[test]
+    fn demo_accepts_only_bounded_single_line_prompts_and_known_platforms() {
+        assert!(validate_demo_request(&DemoRequest {
+            input: "find large files".to_string(),
+            os: "macos".to_string(),
+            interactive: false,
+        })
+        .is_ok());
+        assert!(validate_demo_request(&DemoRequest {
+            input: "first line\nsecond line".to_string(),
+            os: "macos".to_string(),
+            interactive: false,
+        })
+        .is_err());
+        assert!(validate_demo_request(&DemoRequest {
+            input: "pwd".to_string(),
+            os: "plan9".to_string(),
+            interactive: false,
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn demo_allows_only_sandbox_tools_and_pipelines() {
+        assert!(is_allowed_demo_command("ls -la"));
+        assert!(is_allowed_demo_command("ls -lhS | head -n 10"));
+        assert!(is_allowed_demo_command("cat 'README.md' | wc -l"));
+        assert!(is_allowed_demo_command("find . -type f -name '*.rs'"));
+        assert!(is_allowed_demo_command("grep -R TODO projects"));
+        assert!(is_allowed_demo_command("sha256sum README.md"));
+        assert!(is_allowed_demo_command("diff README.md todo.txt"));
+        assert!(is_allowed_demo_command("mkdir -p photos"));
+        assert!(is_allowed_demo_command("column -s, -t garden/plants.csv"));
+        assert!(is_allowed_demo_command("column -t -s, < garden/plants.csv"));
+        assert!(is_allowed_demo_command("cp todo.txt todo-backup.txt"));
+        assert!(is_allowed_demo_command("touch notes.txt"));
+        assert!(is_allowed_demo_command("rm notes.txt"));
+        assert!(is_allowed_demo_command(
+            "base64 --decode messages/URGENT_DO_NOT_DECODE.b64 > messages/URGENT_DO_NOT_DECODE.txt"
+        ));
+        assert!(is_allowed_demo_command("cat < README.md > README-copy.md"));
+        assert!(is_allowed_demo_command(
+            "for file in museum/*.txt; do cat \"$file\"; done"
+        ));
+
+        assert!(!is_allowed_demo_command("wasmer run python/python"));
+        assert!(!is_allowed_demo_command("bash -c 'uname -a'"));
+        assert!(!is_allowed_demo_command("du -ah ."));
+        assert!(!is_allowed_demo_command("rg TODO projects"));
+        assert!(!is_allowed_demo_command("cat data.json | jq '.name'"));
+        assert!(!is_allowed_demo_command("cat README.md > /tmp/copy.txt"));
+        assert!(!is_allowed_demo_command("cat README.md > ../copy.txt"));
+        assert!(!is_allowed_demo_command("cat README.md >> copy.txt"));
+        assert!(!is_allowed_demo_command(
+            "cat README.md > one.txt > two.txt"
+        ));
+        assert!(!is_allowed_demo_command("cat README.md > copy.txt | wc -l"));
+        assert!(!is_allowed_demo_command("cat << README.md"));
+        assert!(!is_allowed_demo_command("cat < ../README.md"));
+        assert!(!is_allowed_demo_command("echo $(printenv)"));
+        assert!(!is_allowed_demo_command("ls; rm -rf /"));
+        assert!(!is_allowed_demo_command("yes | head -n 1"));
+        assert!(!is_allowed_demo_command("ls || true"));
+        assert!(!is_allowed_demo_command("ls | | wc"));
+        assert!(!is_allowed_demo_command("cat 'README.md"));
+        assert!(!is_allowed_demo_command("find . -exec cat {} +"));
+        assert!(!is_allowed_demo_command("find . -delete"));
+        assert!(!is_allowed_demo_command("sort --output=copy.txt README.md"));
+        assert!(!is_allowed_demo_command(
+            "sort --compress-program=cat README.md"
+        ));
+        assert!(!is_allowed_demo_command(
+            "for file in museum/*.txt; do rm \"$file\"; done"
+        ));
+        assert!(!is_allowed_demo_command(
+            "for file in ../museum/*.txt; do cat \"$file\"; done"
+        ));
+    }
+
+    #[test]
     fn validates_revision_context() {
         let mut revised = request("show files");
         revised.revision = Some(jst_shared::CommandRevision {
@@ -677,6 +1271,31 @@ mod tests {
             HeaderValue::from_static("not-an-id"),
         );
         assert!(request_fingerprint(&headers).is_err());
+    }
+
+    #[test]
+    fn demo_requires_an_allowed_origin_and_browser_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", HeaderValue::from_static("https://jst.sh"));
+        headers.insert(
+            "x-jst-browser-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        let allowed = vec!["https://jst.sh".to_string()];
+
+        assert_eq!(
+            allowed_demo_origin(&headers, &allowed).unwrap(),
+            "https://jst.sh"
+        );
+        assert_eq!(
+            request_browser_fingerprint(&headers).unwrap(),
+            "demo:browser:123e4567-e89b-12d3-a456-426614174000"
+        );
+
+        headers.insert("origin", HeaderValue::from_static("https://example.com"));
+        assert!(allowed_demo_origin(&headers, &allowed).is_err());
+        headers.remove("x-jst-browser-id");
+        assert!(request_browser_fingerprint(&headers).is_err());
     }
 
     #[test]
@@ -730,6 +1349,16 @@ mod tests {
                     max_client_entries: 100,
                 },
             )),
+            demo_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            )),
+            demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
         };
         let mut headers = HeaderMap::new();
@@ -806,6 +1435,16 @@ mod tests {
                     max_client_entries: 100,
                 },
             )),
+            demo_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            )),
+            demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
         };
 
@@ -839,6 +1478,8 @@ mod tests {
         let snapshot = super::stats::StatsSnapshot {
             total: 42,
             top_commands: Vec::new(),
+            browser_toolbox_misses: 3,
+            top_browser_toolbox_misses: Vec::new(),
             daily: vec![
                 super::stats::DayCount {
                     date: "2026-07-21".to_string(),

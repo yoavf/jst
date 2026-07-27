@@ -99,6 +99,7 @@ struct UpstashLimits {
 
 #[derive(Clone, Copy)]
 struct LimitConfig {
+    namespace: &'static str,
     minute: Option<Limit>,
     daily_ip: Option<Limit>,
     monthly: Option<Limit>,
@@ -116,6 +117,7 @@ struct Limit {
 struct ActiveLimit<'a> {
     kind: LimitKind,
     config: Limit,
+    namespace: &'static str,
     fingerprint: &'a str,
 }
 
@@ -140,7 +142,15 @@ struct Usage {
 
 impl RateLimits {
     pub fn from_env(client: &reqwest::Client, config: Config) -> Self {
-        let config = LimitConfig::new(config);
+        Self::from_env_scoped(client, config, "")
+    }
+
+    pub fn from_env_scoped(
+        client: &reqwest::Client,
+        config: Config,
+        namespace: &'static str,
+    ) -> Self {
+        let config = LimitConfig::new_scoped(config, namespace);
         let url = std::env::var("UPSTASH_REDIS_REST_URL")
             .ok()
             .filter(|value| !value.is_empty());
@@ -218,9 +228,15 @@ impl RateLimits {
 }
 
 impl LimitConfig {
+    #[cfg(test)]
     fn new(config: Config) -> Self {
+        Self::new_scoped(config, "")
+    }
+
+    fn new_scoped(config: Config, namespace: &'static str) -> Self {
         let client_entries = config.max_client_entries.max(1);
         Self {
+            namespace,
             minute: Limit::enabled(
                 "minute",
                 config.minute_limit,
@@ -258,6 +274,7 @@ impl LimitConfig {
             active.push(ActiveLimit {
                 kind: LimitKind::Minute,
                 config,
+                namespace: self.namespace,
                 fingerprint: client_fingerprint,
             });
         }
@@ -265,6 +282,7 @@ impl LimitConfig {
             active.push(ActiveLimit {
                 kind: LimitKind::DailyIp,
                 config,
+                namespace: self.namespace,
                 fingerprint: client_fingerprint,
             });
         }
@@ -272,6 +290,7 @@ impl LimitConfig {
             active.push(ActiveLimit {
                 kind: LimitKind::Monthly,
                 config,
+                namespace: self.namespace,
                 fingerprint,
             });
         }
@@ -279,7 +298,12 @@ impl LimitConfig {
             active.push(ActiveLimit {
                 kind: LimitKind::GlobalDaily,
                 config,
-                fingerprint: "global",
+                namespace: self.namespace,
+                fingerprint: if self.namespace.is_empty() {
+                    "global"
+                } else {
+                    self.namespace
+                },
             });
         }
         active
@@ -436,13 +460,18 @@ fn upstash_request(active: &[ActiveLimit<'_>]) -> (serde_json::Value, Vec<LimitK
     let mut kinds = Vec::with_capacity(active.len());
     for limit in active {
         let fingerprint = hashed_fingerprint(limit.fingerprint);
+        let namespace = if limit.namespace.is_empty() {
+            String::new()
+        } else {
+            format!(":{}", limit.namespace)
+        };
         command.push(serde_json::Value::String(format!(
-            "{RATE_LIMIT_KEY_PREFIX}:{}:counter:{fingerprint}",
-            limit.config.name
+            "{RATE_LIMIT_KEY_PREFIX}{namespace}:{}:counter:{fingerprint}",
+            limit.config.name,
         )));
         command.push(serde_json::Value::String(format!(
-            "{RATE_LIMIT_KEY_PREFIX}:{}:entries",
-            limit.config.name
+            "{RATE_LIMIT_KEY_PREFIX}{namespace}:{}:entries",
+            limit.config.name,
         )));
         fingerprints.push(fingerprint);
         kinds.push(limit.kind);
@@ -625,6 +654,27 @@ mod tests {
         assert!(!encoded.contains("192.0.2.1"));
         assert!(encoded.contains("jst:rate-limit:minute:counter:"));
         assert!(encoded.contains("jst:rate-limit:global-daily:entries"));
+    }
+
+    #[test]
+    fn redis_request_scopes_demo_counters_away_from_cli_counters() {
+        let config = LimitConfig::new_scoped(
+            Config {
+                monthly_limit: 2,
+                minute_limit: 2,
+                daily_ip_limit: 3,
+                global_daily_limit: 4,
+                max_client_entries: 10,
+            },
+            "demo",
+        );
+        let active = config.active(Some("browser:secret"), "address:192.0.2.1");
+        let (request, _) = upstash_request(&active);
+        let encoded = serde_json::to_string(&request).unwrap();
+
+        assert!(encoded.contains("jst:rate-limit:demo:minute:counter:"));
+        assert!(encoded.contains("jst:rate-limit:demo:global-daily:entries"));
+        assert!(!encoded.contains("jst:rate-limit:minute:counter:"));
     }
 
     #[test]
