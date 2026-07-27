@@ -64,14 +64,16 @@ test("shrinks the stats tally after four digits with a readable floor", () => {
   assert.equal(statsTotalSizeStep("18,446,744,073,709,551,615"), 5);
 });
 
-test("ships the additional examples returned by the JST CLI", () => {
+test("ships cross-platform examples returned by the JST CLI", () => {
   assert.match(pageScript, /ps aux/);
-  assert.match(pageScript, /--sort=-%mem/);
-  assert.match(pageScript, /du -h --max-depth=1/);
+  assert.match(pageScript, /sort -nrk 4/);
+  assert.match(pageScript, /du -sk/);
   assert.match(pageScript, /for file in /);
   assert.match(pageScript, /screenshots\/\*\.png/);
   assert.match(pageScript, /openssl rand/);
   assert.match(pageScript, /cut -c1-32/);
+  assert.match(pageScript, /openssl dgst -sha256/);
+  assert.doesNotMatch(pageScript, /--sort=-%mem|--max-depth|sha256sum/);
 });
 
 test("leads with the most interesting examples and omits the expenses search", () => {

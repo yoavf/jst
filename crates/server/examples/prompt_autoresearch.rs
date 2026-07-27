@@ -243,6 +243,8 @@ enum EffectExpectation {
 enum CommandCheck {
     MacTopFiles(usize),
     LinuxTopFiles(usize),
+    MacTopMemoryProcesses(usize),
+    LinuxTopMemoryProcesses(usize),
     MacDirectFilesModifiedToday,
     LinuxDirectFilesModifiedToday,
     SameFilesystem,
@@ -583,7 +585,7 @@ fn build_candidate_prompt(features: PromptFeatures, request: &TranslateRequest) 
     let shell = request.shell.as_deref().unwrap_or("unknown");
     let platform_requirement = match os {
         "macos" | "freebsd" | "openbsd" => {
-            "Use BSD-compatible system utilities; do not assume GNU-only flags."
+            "Use BSD-compatible utilities. GNU-only forms to avoid: ps --sort, du --max-depth, find -maxdepth/-printf, stat -c, sed -r, grep -P, date -d, readlink -f, xargs -r, ls --time-style, and sha256sum."
         }
         "linux" | "android" => "Use commands and flags available on standard Linux/GNU userland.",
         "windows" => "Use commands and syntax available in the target Windows shell.",
@@ -602,7 +604,7 @@ fn build_candidate_prompt(features: PromptFeatures, request: &TranslateRequest) 
 6. Set matches_request to false whenever the command does not completely implement the request.
 7. If no safe, compatible translation is possible, use "# unable to translate" and set matches_request to false."##;
     let targeted_rules = r##"HIGH-VALUE CORRECTNESS RULES
-- On macOS, use BSD-compatible utilities. Never use GNU-only options such as du --max-depth, ls --time-style, find -maxdepth, sed -r, grep -P, readlink -f, date -d, or xargs -r.
+- On macOS, use BSD-compatible utilities. Never use GNU-only forms such as ps --sort, du --max-depth, find -maxdepth/-printf, stat -c, sed -r, grep -P, date -d, readlink -f, xargs -r, ls --time-style, or sha256sum.
 - Preserve explicit constraints literally. "same filesystem" requires a filesystem-boundary option such as find -xdev. "without overwriting" requires a no-clobber option supported on the target or an explicit destination-exists guard.
 - A revision must preserve the original request and current command semantics except for the requested change.
 - Requests to print literal or exact text must quote shell metacharacters as data. Do not activate command substitution, backticks, pipes, separators, backgrounding, or redirection contained in that text.
@@ -642,7 +644,12 @@ Target: macOS/zsh
 Original request: list files modified today
 Current command: find . -type f -mtime 0
 Requested change: only files directly in this folder
-Command pattern: find . ! -name . -prune -type f -newermt "$(date +%Y-%m-%d)" -print"#
+Command pattern: find . ! -name . -prune -type f -newermt "$(date +%Y-%m-%d)" -print
+
+Target: macOS/zsh
+Request: show the five processes using the most memory
+Command pattern: ps aux | sort -nrk 4 | head -n 5
+Never use: ps aux --sort=-%mem | head -n 6 (GNU/Linux only)"#
         }
         "linux" => {
             r#"Target: Linux/bash
@@ -653,7 +660,11 @@ Target: Linux/bash
 Original request: list files modified today
 Current command: find . -type f -mtime 0
 Requested change: only files directly in this folder
-Command pattern: find . -maxdepth 1 -type f -newermt "$(date +%Y-%m-%d)" -print"#
+Command pattern: find . -maxdepth 1 -type f -newermt "$(date +%Y-%m-%d)" -print
+
+Target: Linux/bash
+Request: show the five processes using the most memory
+Command pattern: ps aux --sort=-%mem | head -n 6"#
         }
         _ => "",
     };
@@ -1034,6 +1045,12 @@ fn evaluate_response(case: &Case, response: &TranslateResponse) -> Vec<CheckResu
     let command_checks = match case.command_check {
         CommandCheck::MacTopFiles(limit) => check_mac_top_files(&response.command, limit),
         CommandCheck::LinuxTopFiles(limit) => check_linux_top_files(&response.command, limit),
+        CommandCheck::MacTopMemoryProcesses(limit) => {
+            check_mac_top_memory_processes(&response.command, limit)
+        }
+        CommandCheck::LinuxTopMemoryProcesses(limit) => {
+            check_linux_top_memory_processes(&response.command, limit)
+        }
         CommandCheck::MacDirectFilesModifiedToday => check_mac_direct_today(&response.command),
         CommandCheck::LinuxDirectFilesModifiedToday => check_linux_direct_today(&response.command),
         CommandCheck::SameFilesystem => vec![
@@ -1182,6 +1199,58 @@ fn check_linux_top_files(command: &str, limit: usize) -> Vec<CheckResult> {
                 || lower.contains(&format!("head -{limit}")),
         ),
     ]
+}
+
+fn check_mac_top_memory_processes(command: &str, limit: usize) -> Vec<CheckResult> {
+    let lower = command.to_ascii_lowercase();
+    vec![
+        check("uses ps", contains_word(&lower, "ps")),
+        check("avoids GNU ps sorting", !lower.contains("ps aux --sort")),
+        check(
+            "sorts by the ps memory column",
+            lower.contains("sort")
+                && (lower.contains("k 4")
+                    || lower.contains("k4")
+                    || lower.contains("k 4,4")
+                    || lower.contains("k4,4")),
+        ),
+        check("sorts descending", has_reverse_numeric_sort(&lower)),
+        check("limits process count", has_head_limit(&lower, limit)),
+    ]
+}
+
+fn check_linux_top_memory_processes(command: &str, limit: usize) -> Vec<CheckResult> {
+    let lower = command.to_ascii_lowercase();
+    let uses_gnu_ps_sort = lower.contains("--sort=-%mem") || lower.contains("--sort=-pmem");
+    let uses_external_memory_sort = lower.contains("sort")
+        && (lower.contains("k 4")
+            || lower.contains("k4")
+            || lower.contains("k 4,4")
+            || lower.contains("k4,4"))
+        && has_reverse_numeric_sort(&lower);
+    vec![
+        check("uses ps", contains_word(&lower, "ps")),
+        check(
+            "sorts by memory descending",
+            uses_gnu_ps_sort || uses_external_memory_sort,
+        ),
+        check(
+            "limits process count",
+            has_head_limit(&lower, limit) || has_head_limit(&lower, limit + 1),
+        ),
+    ]
+}
+
+fn has_reverse_numeric_sort(command: &str) -> bool {
+    command.contains("sort -nr")
+        || command.contains("sort -rn")
+        || (command.contains("sort") && command.contains(" -n") && command.contains(" -r"))
+}
+
+fn has_head_limit(command: &str, limit: usize) -> bool {
+    command.contains(&format!("head -n {limit}"))
+        || command.contains(&format!("head -n{limit}"))
+        || command.contains(&format!("head -{limit}"))
 }
 
 fn check_mac_direct_today(command: &str) -> Vec<CheckResult> {
@@ -1421,6 +1490,20 @@ fn training_cases() -> Vec<Case> {
             CommandCheck::LinuxTopFiles(10),
             Some(EffectExpectation::ReadOnly),
         ),
+        initial_case(
+            "mac-top-memory-processes",
+            "show the five processes using the most memory",
+            CommandCheck::MacTopMemoryProcesses(5),
+            Some(EffectExpectation::ReadOnly),
+        ),
+        initial_case_for(
+            "linux-top-memory-processes",
+            "show the five processes using the most memory",
+            "linux",
+            "bash",
+            CommandCheck::LinuxTopMemoryProcesses(5),
+            Some(EffectExpectation::ReadOnly),
+        ),
         revision_case(
             "revision-direct-today",
             "list files modified today",
@@ -1516,6 +1599,20 @@ fn held_out_cases() -> Vec<Case> {
             "linux",
             "bash",
             CommandCheck::LinuxTopFiles(5),
+            Some(EffectExpectation::ReadOnly),
+        ),
+        initial_case(
+            "held-mac-top-memory-processes",
+            "list the three running processes consuming the most memory",
+            CommandCheck::MacTopMemoryProcesses(3),
+            Some(EffectExpectation::ReadOnly),
+        ),
+        initial_case_for(
+            "held-linux-top-memory-processes",
+            "list the three running processes consuming the most memory",
+            "linux",
+            "bash",
+            CommandCheck::LinuxTopMemoryProcesses(3),
             Some(EffectExpectation::ReadOnly),
         ),
         initial_case(
@@ -1831,6 +1928,7 @@ fn terminal_safe(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        check_linux_top_memory_processes, check_mac_top_memory_processes,
         has_active_literal_metacharacters, initial_case_for, prevents_overwrite, read_dotenv,
         suppresses_diagnostics, CommandCheck, EffectExpectation, ExampleLevel, Layout,
         PromptCandidate, PromptFeatures, TargetedRules, UserFormat,
@@ -1874,6 +1972,25 @@ mod tests {
                 build_system_prompt(Some(os), Some(shell), false)
             );
         }
+    }
+
+    #[test]
+    fn distinguishes_macos_and_linux_process_sorting() {
+        assert!(
+            check_mac_top_memory_processes("ps aux | sort -nrk 4 | head -n 5", 5)
+                .iter()
+                .all(|check| check.passed)
+        );
+        assert!(
+            check_mac_top_memory_processes("ps aux --sort=-%mem | head -n 6", 5)
+                .iter()
+                .any(|check| !check.passed)
+        );
+        assert!(
+            check_linux_top_memory_processes("ps aux --sort=-%mem | head -n 6", 5)
+                .iter()
+                .all(|check| check.passed)
+        );
     }
 
     #[test]

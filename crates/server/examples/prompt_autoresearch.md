@@ -62,35 +62,37 @@ Generated audit artifacts are written under the ignored directory
 - `winning-system-prompt.txt` contains the selected prompt for one sample
   environment.
 
-## July 23, 2026 result
+## July 27, 2026 result
 
 The selected `rules-tail-safety-positive-direct-plain` prompt uses:
 
 - ordered core requirements;
 - two narrow safety rules;
 - positive examples selected by target OS;
+- a compact list of common GNU-only forms to avoid on BSD systems;
 - plain initial requests and labeled revision sections;
 - the target environment at the end of the system message.
 
 | Gate | Phi-4 result |
 | --- | ---: |
-| v0.3.0 baseline training | 5/14 cases |
-| selected prompt training | 14/14 cases, 58/58 assertions |
-| held-out | 8/8 cases, 35/35 assertions |
-| stability repeat 1 | 22/22 cases, 93/93 assertions |
-| stability repeat 2 | 22/22 cases, 93/93 assertions |
+| v0.3.0 baseline training | 6/16 cases, 42/68 assertions |
+| selected prompt training | 16/16 cases, 68/68 assertions |
+| held-out | 10/10 cases, 45/45 assertions |
+| stability repeat 1 | 26/26 cases, 113/113 assertions |
+| stability repeat 2 | 26/26 cases, 113/113 assertions |
 
-For the same held-out request, “show only the five biggest regular files
-directly under the current directory,” the selected prompt produced:
+For the held-out request “list the three running processes consuming the most
+memory,” the selected prompt produced:
 
 ```sh
 # macOS / zsh
-find . ! -name . -prune -type f -exec stat -f '%z %N' {} + | sort -nr | head -n 5
+ps aux | sort -nrk 4 | head -n 3
 
 # Linux / bash
-find . -maxdepth 1 -type f -printf '%s %p\n' | sort -nr | head -n 5
+ps aux --sort=-%mem | head -n 4
 ```
 
-The selected macOS prompt was 3,990 characters in that run. A 3,822-character
-training-perfect ablation was rejected by the held-out gate because it generated
-an AWS credential-upload command.
+The selected macOS prompt was 4,303 characters in that run. Variants containing
+only the compact BSD/GNU incompatibility list still generated GNU `ps --sort`
+syntax for macOS. The platform-specific positive example was required to pass
+the process case and its held-out paraphrase.

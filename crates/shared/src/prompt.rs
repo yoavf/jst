@@ -3,7 +3,7 @@ pub fn build_system_prompt(os: Option<&str>, shell: Option<&str>, explain: bool)
     let shell = shell.unwrap_or("unknown");
     let platform_requirement = match os {
         "macos" | "freebsd" | "openbsd" => {
-            "Use BSD-compatible system utilities; do not assume GNU-only flags."
+            "Use BSD-compatible utilities. GNU-only forms to avoid: ps --sort, du --max-depth, find -maxdepth/-printf, stat -c, sed -r, grep -P, date -d, readlink -f, xargs -r, ls --time-style, and sha256sum."
         }
         "linux" | "android" => "Use commands and flags available on standard Linux/GNU userland.",
         "windows" => "Use commands and syntax available in the target Windows shell.",
@@ -19,7 +19,12 @@ Target: macOS/zsh
 Original request: list files modified today
 Current command: find . -type f -mtime 0
 Requested change: only files directly in this folder
-Command pattern: find . ! -name . -prune -type f -newermt "$(date +%Y-%m-%d)" -print"#
+Command pattern: find . ! -name . -prune -type f -newermt "$(date +%Y-%m-%d)" -print
+
+Target: macOS/zsh
+Request: show the five processes using the most memory
+Command pattern: ps aux | sort -nrk 4 | head -n 5
+Never use: ps aux --sort=-%mem | head -n 6 (GNU/Linux only)"#
         }
         "linux" | "android" => {
             r#"Target: Linux/bash
@@ -30,7 +35,11 @@ Target: Linux/bash
 Original request: list files modified today
 Current command: find . -type f -mtime 0
 Requested change: only files directly in this folder
-Command pattern: find . -maxdepth 1 -type f -newermt "$(date +%Y-%m-%d)" -print"#
+Command pattern: find . -maxdepth 1 -type f -newermt "$(date +%Y-%m-%d)" -print
+
+Target: Linux/bash
+Request: show the five processes using the most memory
+Command pattern: ps aux --sort=-%mem | head -n 6"#
         }
         _ => "",
     };
@@ -129,6 +138,9 @@ mod tests {
         assert!(prompt.contains("Shell: /bin/zsh"));
         assert!(prompt.contains("BSD-compatible"));
         assert!(prompt.contains("stat -f"));
+        assert!(prompt.contains("ps --sort"));
+        assert!(prompt.contains("ps aux | sort -nrk 4 | head -n 5"));
+        assert!(prompt.contains("GNU/Linux only"));
         assert!(!prompt.contains("find . -maxdepth 1"));
         assert!(prompt.contains("\"deletes_data\":false"));
         assert!(prompt.contains("\"matches_request\":true"));
