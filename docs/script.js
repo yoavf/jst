@@ -153,7 +153,7 @@ let demoReviewCancel = null;
 const AUTO_ROTATE_DELAY = 5000;
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const DEFAULT_DEMO_REQUEST = "list files in this folder";
-const IS_LOCAL_DEMO = ["127.0.0.1", "localhost"].includes(location.hostname);
+const IS_LOCAL_DEMO = location.hostname !== "jst.sh";
 const DEMO_URL = IS_LOCAL_DEMO
   ? "/api/jst-demo"
   : "https://jst-server.fly.dev/demo";
