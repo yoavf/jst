@@ -1,0 +1,13 @@
+services:
+  web:
+    image: node:22
+    working_dir: /app
+    command: sh -c "npm install && npx vite docs --config vite.config.js --base / --host 0.0.0.0 --port 3000"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - .:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
