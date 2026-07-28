@@ -34,7 +34,7 @@ export default defineConfig({
     },
     proxy: {
       "/api/jst-demo": {
-        target: "https://jst-server.fly.dev",
+        target: "http://server:8080",
         changeOrigin: true,
         headers: {
           origin: "https://jst.sh",
@@ -42,7 +42,7 @@ export default defineConfig({
         rewrite: () => "/demo",
       },
       "/api/jst-status": {
-        target: "https://jst-server.fly.dev",
+        target: "http://server:8080",
         changeOrigin: true,
         rewrite: () => "/status",
       },
