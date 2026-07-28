@@ -173,6 +173,15 @@ browser endpoint. `DEMO_MONTHLY_REQUEST_LIMIT`,
 `DEMO_GLOBAL_DAILY_REQUEST_LIMIT` configure its independent quota namespace.
 Each numeric limit accepts `0` to disable it.
 
+`DEMO_LLM_API_KEY` configures a provider credential used only by `/demo`;
+`DEMO_OPENROUTER_API_KEY` is accepted as an alias. The demo never falls back to
+`LLM_API_KEY` or `OPENROUTER_API_KEY`, so the browser and CLI traffic can be
+tracked and revoked independently. If the demo key is absent or rejected by
+the provider, `/demo` returns a generic temporary-unavailability response
+without exposing provider details. Set `DEMO_LLM_API_KEY` to an explicitly
+empty value when a self-hosted provider intentionally requires no
+authentication.
+
 The CLI creates a random installation ID in its config directory and sends it
 with translation requests. The server stores only a hash of that ID; older
 clients fall back to a Fly-provided IP address. When
@@ -188,6 +197,7 @@ OpenAI-compatible chat-completions API. For example, using OpenRouter:
 ```sh
 LLM_API_URL=https://openrouter.ai/api/v1/chat/completions \
 LLM_API_KEY=... \
+DEMO_LLM_API_KEY=... \
 LLM_MODEL=google/gemma-4-26b-a4b-it \
 LLM_FALLBACK_MODEL=microsoft/phi-4 \
 cargo run --release -p jst-server

@@ -24,6 +24,8 @@ const MAX_DEMO_INPUT_BYTES: usize = 280;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
 const RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_DEMO_ALLOWED_ORIGIN: &str = "https://jst.sh";
+const DEMO_UNAVAILABLE_MESSAGE: &str =
+    "the browser demo is temporarily unavailable; try again later";
 const DEMO_COMMANDS: &[&str] = &[
     "arch",
     "b2sum",
@@ -105,6 +107,7 @@ struct AppState {
     client: reqwest::Client,
     llm_api_url: String,
     llm_api_key: String,
+    demo_llm_api_key: Option<String>,
     llm_model: String,
     llm_fallback_model: Option<String>,
     translation_slots: Arc<Semaphore>,
@@ -156,6 +159,9 @@ async fn main() {
     let llm_api_key = std::env::var("LLM_API_KEY")
         .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
         .unwrap_or_default();
+    let demo_llm_api_key = std::env::var("DEMO_LLM_API_KEY")
+        .or_else(|_| std::env::var("DEMO_OPENROUTER_API_KEY"))
+        .ok();
     let llm_model = std::env::var("LLM_MODEL")
         .or_else(|_| std::env::var("OPENROUTER_MODEL"))
         .expect("LLM_MODEL environment variable must be set");
@@ -238,6 +244,7 @@ async fn main() {
         client,
         llm_api_url,
         llm_api_key,
+        demo_llm_api_key,
         llm_model,
         llm_fallback_model,
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
@@ -458,6 +465,10 @@ async fn translate_with_limits(
     req: &TranslateRequest,
     reject_unsafe_display: bool,
 ) -> Response {
+    if reject_unsafe_display && state.demo_llm_api_key.is_none() {
+        return demo_unavailable_response();
+    }
+
     let client_fingerprint = address_fingerprint
         .as_deref()
         .or(installation_fingerprint.as_deref())
@@ -543,7 +554,10 @@ async fn translate_with_limits(
         openai_compatible::translate_demo(
             &state.client,
             &state.llm_api_url,
-            &state.llm_api_key,
+            state
+                .demo_llm_api_key
+                .as_deref()
+                .expect("demo key presence checked before translation"),
             &state.llm_model,
             state.llm_fallback_model.as_deref(),
             req,
@@ -600,13 +614,17 @@ async fn translate_with_limits(
         }
         Err(error) => {
             error!("Translation error: {error}");
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(ErrorResponse {
-                    error: "trouble reaching the LLM; try again in a moment".to_string(),
-                }),
-            )
-                .into_response()
+            if reject_unsafe_display {
+                demo_unavailable_response()
+            } else {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(ErrorResponse {
+                        error: "trouble reaching the LLM; try again in a moment".to_string(),
+                    }),
+                )
+                    .into_response()
+            }
         }
     };
     with_usage_headers(response, usage)
@@ -685,6 +703,16 @@ fn busy_response() -> Response {
         StatusCode::TOO_MANY_REQUESTS,
         Json(ErrorResponse {
             error: "translation service is busy; try again shortly".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn demo_unavailable_response() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(ErrorResponse {
+            error: DEMO_UNAVAILABLE_MESSAGE.to_string(),
         }),
     )
         .into_response()
@@ -1109,19 +1137,23 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        allowed_demo_origin, is_allowed_demo_command, request_browser_fingerprint,
+        allowed_demo_origin, demo_inner, is_allowed_demo_command, request_browser_fingerprint,
         request_fingerprint, request_limit_fingerprints, status_usage, translate,
-        validate_demo_request, validate_request, with_usage_headers, AppState, DemoRequest,
-        UsageHeaders,
+        translate_with_limits, validate_demo_request, validate_request, with_usage_headers,
+        AppState, DemoRequest, UsageHeaders, DEMO_UNAVAILABLE_MESSAGE,
     };
     use axum::{
+        body::to_bytes,
         extract::State,
         http::{HeaderMap, HeaderValue, StatusCode},
         response::IntoResponse,
         Json,
     };
-    use jst_shared::TranslateRequest;
-    use std::{sync::Arc, time::Duration};
+    use jst_shared::{ErrorResponse, TranslateRequest};
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
     use tokio::sync::Semaphore;
 
     fn request(input: &str) -> TranslateRequest {
@@ -1131,6 +1163,37 @@ mod tests {
             shell: Some("zsh".to_string()),
             explain: false,
             revision: None,
+        }
+    }
+
+    fn provider_test_state(
+        client: reqwest::Client,
+        llm_api_url: String,
+        demo_llm_api_key: Option<String>,
+    ) -> AppState {
+        let disabled_limits = || {
+            Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            ))
+        };
+        AppState {
+            client,
+            llm_api_url,
+            llm_api_key: "app-key".to_string(),
+            demo_llm_api_key,
+            llm_model: "test-model".to_string(),
+            llm_fallback_model: None,
+            translation_slots: Arc::new(Semaphore::new(2)),
+            rate_limits: disabled_limits(),
+            demo_rate_limits: disabled_limits(),
+            demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
+            stats: None,
         }
     }
 
@@ -1319,6 +1382,159 @@ mod tests {
         assert!(request_browser_fingerprint(&headers).is_err());
     }
 
+    #[tokio::test]
+    async fn demo_requires_its_own_provider_key_with_a_clean_error() {
+        let state = provider_test_state(
+            reqwest::Client::new(),
+            "http://unused.invalid".to_string(),
+            None,
+        );
+        let response = demo_inner(
+            &state,
+            &HeaderMap::new(),
+            DemoRequest {
+                input: "show the current directory".to_string(),
+                os: "linux".to_string(),
+                interactive: false,
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error.error, DEMO_UNAVAILABLE_MESSAGE);
+        assert!(!error.error.contains("key"));
+        assert!(!error.error.contains("OpenRouter"));
+    }
+
+    #[tokio::test]
+    async fn app_and_demo_send_separate_provider_keys() {
+        let authorization_headers = Arc::new(Mutex::new(Vec::new()));
+        let mock = axum::Router::new().route(
+            "/",
+            axum::routing::post({
+                let authorization_headers = authorization_headers.clone();
+                move |headers: HeaderMap| {
+                    let authorization_headers = authorization_headers.clone();
+                    async move {
+                        authorization_headers.lock().unwrap().push(
+                            headers
+                                .get("authorization")
+                                .and_then(|value| value.to_str().ok())
+                                .unwrap_or("")
+                                .to_string(),
+                        );
+                        Json(serde_json::json!({
+                            "choices": [{
+                                "message": {
+                                    "role": "assistant",
+                                    "content": serde_json::json!({
+                                        "command": "pwd",
+                                        "effects": {
+                                            "reads_data": true,
+                                            "modifies_data": false,
+                                            "deletes_data": false,
+                                            "uses_network": false,
+                                            "changes_remote_data": false,
+                                            "changes_processes": false,
+                                            "installs_software": false,
+                                            "uses_privilege": false,
+                                            "executes_remote_code": false
+                                        },
+                                        "matches_request": true,
+                                        "explanation": "Prints the current directory."
+                                    }).to_string()
+                                },
+                                "finish_reason": "stop"
+                            }]
+                        }))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock).await.unwrap();
+        });
+        let state = provider_test_state(
+            reqwest::Client::new(),
+            format!("http://{address}"),
+            Some("demo-key".to_string()),
+        );
+
+        let demo_response = demo_inner(
+            &state,
+            &HeaderMap::new(),
+            DemoRequest {
+                input: "show the current directory".to_string(),
+                os: "linux".to_string(),
+                interactive: false,
+            },
+        )
+        .await;
+        let app_response = translate_with_limits(
+            &state,
+            &state.rate_limits,
+            None,
+            None,
+            &request("show the current directory"),
+            false,
+        )
+        .await;
+
+        assert_eq!(demo_response.status(), StatusCode::OK);
+        assert_eq!(app_response.status(), StatusCode::OK);
+        assert_eq!(
+            *authorization_headers.lock().unwrap(),
+            ["Bearer demo-key", "Bearer app-key"]
+        );
+    }
+
+    #[tokio::test]
+    async fn demo_hides_provider_errors_when_its_key_is_revoked() {
+        let mock = axum::Router::new().route(
+            "/",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({
+                        "error": "invalid OpenRouter API key: secret-provider-detail"
+                    })),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, mock).await.unwrap();
+        });
+        let state = provider_test_state(
+            reqwest::Client::new(),
+            format!("http://{address}"),
+            Some("revoked-demo-key".to_string()),
+        );
+
+        let response = demo_inner(
+            &state,
+            &HeaderMap::new(),
+            DemoRequest {
+                input: "show the current directory".to_string(),
+                os: "linux".to_string(),
+                interactive: false,
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error.error, DEMO_UNAVAILABLE_MESSAGE);
+        assert!(!error.error.contains("secret-provider-detail"));
+        assert!(!error.error.contains("OpenRouter"));
+    }
+
     #[test]
     fn permits_anonymous_requests_when_client_limits_are_disabled() {
         assert_eq!(
@@ -1358,6 +1574,7 @@ mod tests {
             client: client.clone(),
             llm_api_url: "http://unused.invalid".to_string(),
             llm_api_key: String::new(),
+            demo_llm_api_key: Some(String::new()),
             llm_model: "unused".to_string(),
             llm_fallback_model: None,
             translation_slots: Arc::new(Semaphore::new(0)),
@@ -1441,6 +1658,7 @@ mod tests {
             client: client.clone(),
             llm_api_url: "http://127.0.0.1:9".to_string(),
             llm_api_key: String::new(),
+            demo_llm_api_key: Some(String::new()),
             llm_model: "unused".to_string(),
             llm_fallback_model: None,
             translation_slots: slots.clone(),
