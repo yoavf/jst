@@ -231,6 +231,26 @@ commands are never retained.
 Alternatively, `JST_API_URL` can point directly to any service implementing
 JST's `/translate` JSON contract.
 
+## Similar projects
+
+There are several thoughtful takes on natural-language shell interfaces. If
+JST is useful to you, these may be worth exploring too:
+
+- [ask](https://github.com/ykushch/ask) — local, Ollama-powered command
+  translation with project context and an interactive mode.
+- [AI CLI](https://github.com/kriserickson/ai-cli) — a multi-provider command
+  translator with one-shot and interactive modes and an execution safety
+  policy.
+- [zsh-ai](https://github.com/matheusml/zsh-ai) — inserts a generated command
+  into the current zsh prompt so it can be reviewed and edited before running.
+- [ShellSage](https://github.com/AnswerDotAI/shell_sage) — a tmux-aware
+  assistant that uses terminal history and piped output as context.
+- [NatShell](https://github.com/Barent/natshell) — a local-first agentic shell
+  TUI with bundled-model and remote-provider support.
+- [AISH](https://github.com/AI-Shell-Team/aish) — a full PTY shell with
+  natural-language operations, command explanations, risk levels, and an
+  optional sandbox pre-run.
+
 ## Development
 
 GitHub Actions runs formatting, build, tests, and Clippy on every pull request
