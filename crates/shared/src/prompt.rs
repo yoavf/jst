@@ -126,9 +126,21 @@ No markdown, code fences, commentary, or additional keys."#.to_string()
     sections.join("\n\n")
 }
 
+pub fn build_user_prompt(input: &str, revision: Option<&crate::CommandRevision>) -> String {
+    let Some(revision) = revision else {
+        return input.to_string();
+    };
+
+    format!(
+        "TASK: revise_command\nORIGINAL_REQUEST:\n{}\nCURRENT_COMMAND:\n{}\nREQUESTED_CHANGE:\n{}",
+        input, revision.command, revision.instruction
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::build_system_prompt;
+    use super::{build_system_prompt, build_user_prompt};
+    use crate::CommandRevision;
 
     #[test]
     fn includes_target_environment_and_required_effects() {
@@ -176,5 +188,21 @@ mod tests {
         assert!(prompt.contains("standalone explanation"));
         assert!(prompt.contains("\"parts\":["));
         assert!(prompt.contains("\"source\":\"...\""));
+    }
+
+    #[test]
+    fn structures_revisions_without_concatenating_instructions() {
+        let prompt = build_user_prompt(
+            "show large files",
+            Some(&CommandRevision {
+                command: "du -ah . | sort -hr".to_string(),
+                instruction: "only show the first ten".to_string(),
+            }),
+        );
+
+        assert!(prompt.starts_with("TASK: revise_command\n"));
+        assert!(prompt.contains("ORIGINAL_REQUEST:\nshow large files"));
+        assert!(prompt.contains("CURRENT_COMMAND:\ndu -ah . | sort -hr"));
+        assert!(prompt.contains("REQUESTED_CHANGE:\nonly show the first ten"));
     }
 }

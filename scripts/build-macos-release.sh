@@ -24,8 +24,10 @@ lipo -create \
     "$ROOT/target/x86_64-apple-darwin/release/jst" \
     -output "$OUTPUT_DIR/jst"
 chmod 755 "$OUTPUT_DIR/jst"
+"$ROOT/scripts/build-apple-intelligence-helper.sh" "$OUTPUT_DIR/jst-apple-intelligence"
 cp "$ROOT/LICENSE" "$OUTPUT_DIR/LICENSE"
 
 lipo -info "$OUTPUT_DIR/jst"
+lipo -info "$OUTPUT_DIR/jst-apple-intelligence"
 "$OUTPUT_DIR/jst" --version
 echo "$OUTPUT_DIR"
