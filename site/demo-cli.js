@@ -1,4 +1,4 @@
-export const JST_VERSION = "0.3.2";
+export const JST_VERSION = "0.4.0";
 
 export const JST_HELP = `Turn plain English into a shell command and run it
 

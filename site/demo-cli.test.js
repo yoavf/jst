@@ -8,7 +8,7 @@ test("supports the complete JST option surface", () => {
   assert.match(JST_HELP, /--interactive/);
   assert.match(JST_HELP, /--dry/);
   assert.match(JST_HELP, /--status/);
-  assert.equal(JST_VERSION, "0.3.2");
+  assert.equal(JST_VERSION, "0.4.0");
 
   assert.deepEqual(parseJstInvocation(""), { action: "help" });
   assert.deepEqual(parseJstInvocation("--help"), { action: "help" });
