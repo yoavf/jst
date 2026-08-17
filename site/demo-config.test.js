@@ -40,7 +40,7 @@ test("loads one versioned browser toolbox bundle in both page and worker", () =>
 });
 
 test("cache-busts every layer of the sandbox runtime", () => {
-  assert.match(pageMarkup, /script\.js\?v=45/);
+  assert.match(pageMarkup, /script\.js\?v=46/);
   assert.match(pageScript, /demo-runtime\.js\?v=4/);
   assert.match(runtimeBundle, /demo-sandbox\.html\?v=15/);
   assert.match(sandboxMarkup, /demo-sandbox\.js\?v=15/);
@@ -73,11 +73,27 @@ test("public stats chart begins at its published start date", () => {
         { date: "2026-08-17", count: 8 },
       ],
       "2026-08-16",
+      [
+        { date: "2026-08-10", count: 2 },
+        { date: "2026-08-15", count: 3 },
+      ],
     ),
     [
+      { date: "2026-08-10", count: 2 },
+      { date: "2026-08-15", count: 3 },
       { date: "2026-08-16", count: 5 },
       { date: "2026-08-17", count: 8 },
     ],
+  );
+});
+
+test("pre-launch stats preserve every historical query", () => {
+  const prelaunch = pageScript.matchAll(
+    /date: "2026-08-1[0-5]", count: (\d+)/g,
+  );
+  assert.equal(
+    [...prelaunch].reduce((total, match) => total + Number(match[1]), 0),
+    343,
   );
 });
 

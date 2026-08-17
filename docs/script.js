@@ -1,6 +1,6 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
 import { isAllowedDemoCommand } from "./assets/demo-command-v6.js";
-import { publicStatsDays, statsTotalSizeStep } from "./stats-display.js?v=2";
+import { publicStatsDays, statsTotalSizeStep } from "./stats-display.js?v=3";
 
 const examples = [
   {
@@ -1146,7 +1146,15 @@ window.addEventListener("pagehide", () => {
 const STATS_URL = "https://jst-server.fly.dev/stats";
 const STATS_REFRESH_INTERVAL_MS = 60_000;
 const MAX_COMMAND_BARS = 10;
-const STATS_CHART_START_DATE = "2026-08-16";
+const LIVE_STATS_START_DATE = "2026-08-16";
+const PRELAUNCH_DAILY_STATS = [
+  { date: "2026-08-10", count: 56 },
+  { date: "2026-08-11", count: 42 },
+  { date: "2026-08-12", count: 95 },
+  { date: "2026-08-13", count: 143 },
+  { date: "2026-08-14", count: 6 },
+  { date: "2026-08-15", count: 1 },
+];
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -1225,7 +1233,11 @@ async function loadStats() {
     );
   }
 
-  const allDays = publicStatsDays(stats.daily || [], STATS_CHART_START_DATE);
+  const allDays = publicStatsDays(
+    stats.daily || [],
+    LIVE_STATS_START_DATE,
+    PRELAUNCH_DAILY_STATS,
+  );
   const firstActiveDay = allDays.findIndex((day) => day.count > 0);
   const daysSinceLaunch = firstActiveDay === -1 ? allDays : allDays.slice(firstActiveDay);
   const days = daysSinceLaunch.slice(-30);

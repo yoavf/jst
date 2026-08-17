@@ -3,6 +3,9 @@ export function statsTotalSizeStep(formattedValue) {
   return Math.min(Math.max(digitCount - 4, 0), 5);
 }
 
-export function publicStatsDays(days, startDate) {
-  return days.filter((day) => day.date >= startDate);
+export function publicStatsDays(days, liveStartDate, prelaunchDays = []) {
+  return [
+    ...prelaunchDays,
+    ...days.filter((day) => day.date >= liveStartDate),
+  ];
 }
