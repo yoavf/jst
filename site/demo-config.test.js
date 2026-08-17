@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import viteConfig from "../vite.config.js";
-import { statsTotalSizeStep } from "../docs/stats-display.js";
+import { publicStatsDays, statsTotalSizeStep } from "../docs/stats-display.js";
 
 const [pageScript, pageStyles, runtimeBundle, sandboxBundle, sandboxMarkup] =
   await Promise.all([
@@ -40,7 +40,7 @@ test("loads one versioned browser toolbox bundle in both page and worker", () =>
 });
 
 test("cache-busts every layer of the sandbox runtime", () => {
-  assert.match(pageMarkup, /script\.js\?v=44/);
+  assert.match(pageMarkup, /script\.js\?v=45/);
   assert.match(pageScript, /demo-runtime\.js\?v=4/);
   assert.match(runtimeBundle, /demo-sandbox\.html\?v=15/);
   assert.match(sandboxMarkup, /demo-sandbox\.js\?v=15/);
@@ -62,6 +62,23 @@ test("shrinks the stats tally after four digits with a readable floor", () => {
   assert.equal(statsTotalSizeStep("99,999,999"), 4);
   assert.equal(statsTotalSizeStep("1,000,000,000"), 5);
   assert.equal(statsTotalSizeStep("18,446,744,073,709,551,615"), 5);
+});
+
+test("public stats chart begins at its published start date", () => {
+  assert.deepEqual(
+    publicStatsDays(
+      [
+        { date: "2026-08-15", count: 3 },
+        { date: "2026-08-16", count: 5 },
+        { date: "2026-08-17", count: 8 },
+      ],
+      "2026-08-16",
+    ),
+    [
+      { date: "2026-08-16", count: 5 },
+      { date: "2026-08-17", count: 8 },
+    ],
+  );
 });
 
 test("ships cross-platform examples returned by the JST CLI", () => {
