@@ -10,8 +10,7 @@ jst find all files bigger than 500 mb in ~/downloads
   <img src="https://jst.sh/demo.gif" width="960" alt="A randomly selected jst terminal demo">
 </p>
 
-The demo above is randomly selected on each fresh image request. It is recorded
-from a real `jst` run; [see every demo](docs/demos/).
+<p align="center"><em>Reload for another random demo</em></p>
 
 ## Install
 
