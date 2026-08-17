@@ -1,7 +1,6 @@
 const DEMO_FILES = [
   "changed-today.gif",
   "clear-port-8080.gif",
-  "largest-files.gif",
   "remove-ds-store.gif",
   "zip-folder.gif",
 ];
