@@ -22,6 +22,9 @@ const INSTALLATION_ID_HEADER: &str = "x-jst-installation-id";
 const CONFIRMATION_WIDTH: usize = 88;
 const MAX_MANUAL_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
+const MAX_HELPER_ERROR_BYTES: usize = 8 * 1024;
+const APPLE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(90);
+const APPLE_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 const APPLE_HELPER_NAME: &str = "jst-apple-intelligence";
 const APPLE_MODEL_NAME: &str = "Apple Intelligence (on-device)";
 
@@ -293,35 +296,18 @@ async fn translate_with_apple_intelligence(
         explain: request.explain,
     })
     .map_err(|_| JstError::Other("could not encode Apple Intelligence request".to_string()))?;
-    let mut command = tokio::process::Command::new(helper);
-    command.stdin(std::process::Stdio::piped());
-    command.stdout(std::process::Stdio::piped());
-    command.stderr(std::process::Stdio::piped());
-    command.kill_on_drop(true);
-    let mut child = command.spawn().map_err(|error| {
-        JstError::AppleIntelligence(format!("could not start the bundled helper: {error}"))
-    })?;
-    let mut stdin = child.stdin.take().ok_or_else(|| {
-        JstError::AppleIntelligence("could not open the helper input".to_string())
-    })?;
-    use tokio::io::AsyncWriteExt;
-    stdin.write_all(&input).await.map_err(|error| {
-        JstError::AppleIntelligence(format!("could not send the request to the helper: {error}"))
-    })?;
-    drop(stdin);
-
-    let output = tokio::time::timeout(Duration::from_secs(90), child.wait_with_output())
-        .await
-        .map_err(|_| JstError::AppleIntelligence("did not respond within 90 seconds".to_string()))?
-        .map_err(|error| JstError::AppleIntelligence(format!("helper did not finish: {error}")))?;
+    let output = run_apple_helper(
+        helper,
+        &[],
+        Some(&input),
+        MAX_RESPONSE_BYTES,
+        APPLE_TRANSLATION_TIMEOUT,
+    )
+    .await?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        return Err(JstError::AppleIntelligence(helper_error_message(&detail)));
-    }
-    if output.stdout.len() > MAX_RESPONSE_BYTES {
-        return Err(JstError::AppleIntelligence(
-            "returned a response that was too large".to_string(),
-        ));
+        return Err(JstError::AppleIntelligence(helper_error_message(
+            &output.stderr,
+        )));
     }
 
     let response = serde_json::from_slice(&output.stdout).map_err(|_| {
@@ -330,33 +316,37 @@ async fn translate_with_apple_intelligence(
     validate_apple_response(response)
 }
 
-fn validate_apple_response(response: TranslateResponse) -> Result<TranslateResponse, JstError> {
+fn validate_apple_response(mut response: TranslateResponse) -> Result<TranslateResponse, JstError> {
     if response.command.is_empty() || response.command.len() > MAX_MANUAL_COMMAND_BYTES {
         return Err(JstError::AppleIntelligence(
             "returned an invalid command".to_string(),
         ));
     }
-    if response.explanation.len() > 1024 || response.parts.len() > 8 {
+    if response.explanation.len() > 1024 {
         return Err(JstError::AppleIntelligence(
             "returned an invalid explanation".to_string(),
         ));
+    }
+    if response.parts.len() > 8 {
+        response.parts.clear();
     }
     Ok(response)
 }
 
 async fn print_apple_intelligence_status() -> Result<(), JstError> {
     ensure_apple_intelligence_supported()?;
-    let output = tokio::process::Command::new(apple_helper_path()?)
-        .arg("--status")
-        .kill_on_drop(true)
-        .output()
-        .await
-        .map_err(|error| {
-            JstError::AppleIntelligence(format!("could not start the bundled helper: {error}"))
-        })?;
+    let output = run_apple_helper(
+        apple_helper_path()?,
+        &["--status"],
+        None,
+        MAX_STATUS_RESPONSE_BYTES,
+        APPLE_STATUS_TIMEOUT,
+    )
+    .await?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        return Err(JstError::AppleIntelligence(helper_error_message(&detail)));
+        return Err(JstError::AppleIntelligence(helper_error_message(
+            &output.stderr,
+        )));
     }
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| {
         JstError::AppleIntelligence("returned an invalid status response".to_string())
@@ -373,6 +363,102 @@ async fn print_apple_intelligence_status() -> Result<(), JstError> {
         .and_then(|_| writeln!(stdout, "Availability: {}", terminal_safe(availability)))
         .and_then(|_| writeln!(stdout, "Network: not used"))
         .map_err(|error| JstError::Other(format!("{error}")))
+}
+
+struct AppleHelperOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+async fn run_apple_helper(
+    helper: PathBuf,
+    arguments: &[&str],
+    input: Option<&[u8]>,
+    stdout_limit: usize,
+    timeout: Duration,
+) -> Result<AppleHelperOutput, JstError> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut command = tokio::process::Command::new(helper);
+    command.args(arguments);
+    command.stdin(std::process::Stdio::piped());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+    command.kill_on_drop(true);
+    let mut child = command.spawn().map_err(|error| {
+        JstError::AppleIntelligence(format!("could not start the bundled helper: {error}"))
+    })?;
+    if let Some(input) = input {
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            JstError::AppleIntelligence("could not open the helper input".to_string())
+        })?;
+        stdin.write_all(input).await.map_err(|error| {
+            JstError::AppleIntelligence(format!(
+                "could not send the request to the helper: {error}"
+            ))
+        })?;
+    }
+    drop(child.stdin.take());
+    let stdout = child.stdout.take().ok_or_else(|| {
+        JstError::AppleIntelligence("could not open the helper output".to_string())
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        JstError::AppleIntelligence("could not open the helper error output".to_string())
+    })?;
+
+    let result = tokio::time::timeout(timeout, async {
+        tokio::try_join!(
+            read_limited_stream(stdout, stdout_limit),
+            read_limited_stream(stderr, MAX_HELPER_ERROR_BYTES),
+            child.wait(),
+        )
+    })
+    .await;
+    let (stdout, stderr, status) = match result {
+        Ok(Ok((stdout, stderr, status))) => (stdout, stderr, status),
+        Ok(Err(error)) => {
+            let _ = child.kill().await;
+            return Err(JstError::AppleIntelligence(format!(
+                "could not read the helper response: {error}"
+            )));
+        }
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err(JstError::AppleIntelligence(format!(
+                "did not respond within {} seconds",
+                timeout.as_secs()
+            )));
+        }
+    };
+    Ok(AppleHelperOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+async fn read_limited_stream<R>(mut stream: R, limit: usize) -> io::Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+
+    let mut output = Vec::new();
+    let mut chunk = [0; 8 * 1024];
+    loop {
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 {
+            return Ok(output);
+        }
+        if output.len() + read > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "helper response exceeded the allowed size",
+            ));
+        }
+        output.extend_from_slice(&chunk[..read]);
+    }
 }
 
 fn apple_helper_path() -> Result<PathBuf, JstError> {
@@ -404,6 +490,9 @@ fn ensure_apple_intelligence_supported() -> Result<(), JstError> {
     }
 
     let output = Command::new("sw_vers")
+        // macOS can report a compatibility version to older processes. JST is
+        // built for macOS 27, so request the actual product version explicitly.
+        .env_remove("SYSTEM_VERSION_COMPAT")
         .arg("-productVersion")
         .output()
         .map_err(|_| {
@@ -440,7 +529,8 @@ fn apple_helper_candidates(executable: &Path) -> Vec<PathBuf> {
     candidates
 }
 
-fn helper_error_message(stderr: &str) -> String {
+fn helper_error_message(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
     let message = stderr
         .trim()
         .strip_prefix("jst-apple-intelligence:")
@@ -1436,7 +1526,7 @@ mod tests {
         format_detailed_explanation, format_edit_prompt, format_error, format_proposal_explanation,
         format_review_prompt, format_server_status, format_warning, helper_error_message,
         indent_wrapped, macos_major_version, next_char_end, parse_review_action,
-        previous_char_start, should_confirm, status_url_for, terminal_safe,
+        previous_char_start, read_limited_stream, should_confirm, status_url_for, terminal_safe,
         validate_apple_response, Cli, JstError, ProposalKind, Provider, ReviewAction,
     };
     use clap::{error::ErrorKind, CommandFactory, Parser};
@@ -1672,9 +1762,42 @@ mod tests {
     }
 
     #[test]
+    fn falls_back_to_an_unstructured_explanation_when_there_are_too_many_parts() {
+        let response = TranslateResponse {
+            command: "pwd".to_string(),
+            effects: CommandEffects::default(),
+            matches_request: true,
+            explanation: "Print the current directory.".to_string(),
+            parts: (0..9)
+                .map(|_| CommandPart {
+                    fragment: "pwd".to_string(),
+                    meaning: "Print the current directory.".to_string(),
+                    source: "model".to_string(),
+                })
+                .collect(),
+        };
+
+        let response = validate_apple_response(response).expect("valid response");
+        assert!(response.parts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stops_reading_a_helper_stream_at_its_limit() {
+        use tokio::io::AsyncWriteExt;
+
+        let (mut writer, reader) = tokio::io::duplex(32);
+        let write = tokio::spawn(async move {
+            writer.write_all(b"123456789").await.expect("write stream");
+        });
+
+        assert!(read_limited_stream(reader, 8).await.is_err());
+        write.await.expect("writer task");
+    }
+
+    #[test]
     fn removes_the_helper_error_prefix() {
         assert_eq!(
-            helper_error_message("jst-apple-intelligence: model not enabled\n"),
+            helper_error_message(b"jst-apple-intelligence: model not enabled\n"),
             "model not enabled"
         );
     }

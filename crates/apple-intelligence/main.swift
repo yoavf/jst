@@ -86,7 +86,7 @@ private struct GeneratedDetailedTranslation {
     @Guide(description: "A short standalone explanation of what the command does.")
     var explanation: String
 
-    @Guide(description: "One to eight command fragments in order. Their fragments must concatenate exactly to command.")
+    @Guide(description: "One to eight command fragments in order. Their fragments must concatenate exactly to command.", .maximumCount(8))
     var parts: [GeneratedPart]
 }
 
