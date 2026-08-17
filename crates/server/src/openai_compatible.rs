@@ -1,4 +1,4 @@
-use jst_shared::{build_system_prompt, TranslateRequest, TranslateResponse};
+use jst_shared::{build_system_prompt, build_user_prompt, TranslateRequest, TranslateResponse};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::warn;
@@ -233,7 +233,7 @@ async fn call_llm(
     if demo_mode {
         system_prompt.push_str(DEMO_SYSTEM_ADDENDUM);
     }
-    let user_prompt = user_prompt(req);
+    let user_prompt = build_user_prompt(&req.input, req.revision.as_ref());
 
     let chat_request = ChatRequest {
         model: model.to_string(),
@@ -307,17 +307,6 @@ async fn call_llm(
             sanitize_explanation_parts(&mut response, &source_context, req.explain);
             Ok(response)
         })
-}
-
-fn user_prompt(req: &TranslateRequest) -> String {
-    let Some(revision) = &req.revision else {
-        return req.input.clone();
-    };
-
-    format!(
-        "TASK: revise_command\nORIGINAL_REQUEST:\n{}\nCURRENT_COMMAND:\n{}\nREQUESTED_CHANGE:\n{}",
-        req.input, revision.command, revision.instruction
-    )
 }
 
 fn validate_translation_response(response: &TranslateResponse) -> Result<(), &'static str> {
@@ -445,7 +434,7 @@ async fn read_limited_body(
 mod tests {
     use super::{
         sanitize_explanation_parts, strip_code_fence, translate, translate_with_timeout,
-        user_prompt, validate_translation_response, MODEL_TIMEOUT,
+        validate_translation_response, MODEL_TIMEOUT,
     };
     use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
     use jst_shared::{
@@ -480,7 +469,7 @@ mod tests {
             }),
         };
 
-        let prompt = user_prompt(&request);
+        let prompt = jst_shared::build_user_prompt(&request.input, request.revision.as_ref());
         assert!(prompt.starts_with("TASK: revise_command\n"));
         assert!(prompt.contains("ORIGINAL_REQUEST:\nshow large files"));
         assert!(prompt.contains("CURRENT_COMMAND:\ndu -ah . | sort -hr"));

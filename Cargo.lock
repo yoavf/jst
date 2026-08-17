@@ -644,6 +644,7 @@ dependencies = [
  "jst-shared",
  "regex",
  "reqwest",
+ "serde",
  "serde_json",
  "tokio",
 ]

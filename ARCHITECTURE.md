@@ -13,8 +13,8 @@ JST is a Cargo workspace with three crates:
 
 ```text
 jst natural language request
-  → POST /translate
-  → OpenAI-compatible LLM API
+  → hosted provider: POST /translate → OpenAI-compatible LLM API
+  → Apple provider (macOS 27 beta): bundled Swift helper → FoundationModels system model
   → command + concrete effect description + optional semantic parts
   → local denylist OR dangerous model effects
   → optional interactive session: explain, revise, manually replace,
@@ -41,6 +41,17 @@ concatenating instructions into the original prompt. The model must return a
 complete replacement command and recalculate its effects. The replacement goes
 through the same server validation, local denylist, terminal-safety checks, and
 explicit approval loop as the initial command.
+
+`--provider apple` is an explicit macOS 27.0-beta-or-later option. The CLI
+serializes the normal system and user prompts to the adjacent
+`jst-apple-intelligence` executable over stdin and reads a structured response
+from stdout. The Swift helper uses `FoundationModels` directly and checks
+`SystemLanguageModel.default.availability` before making a request. No Rust
+FFI, provider key, request logging, JST-server quota, or network hop is
+involved. The helper is built and signed beside the universal Rust executable;
+the release package must keep both files together. Homebrew places the helper
+in its private `libexec` directory, which the CLI also locates. Linux and
+Windows releases do not contain the helper and retain the hosted provider flow.
 
 Choosing `e` opens a prefilled inline editor with the cursor at the end. Enter
 counts as execution approval and the edit remains entirely local: it is never
@@ -89,7 +100,8 @@ successful translations only.
 ## Workspace
 
 ```text
-crates/cli/src/main.rs       argument parsing, API calls, interactive loop, execution
+crates/cli/src/main.rs       argument parsing, provider calls, interactive loop, execution
+crates/apple-intelligence/main.swift  macOS 27 FoundationModels helper
 crates/cli/src/installation.rs  anonymous installation ID persistence
 crates/cli/src/safety.rs     deterministic destructive-command denylist
 crates/server/src/main.rs    HTTP server and routes
@@ -110,4 +122,5 @@ JST_API_URL=http://localhost:8080/translate cargo run -p jst-cli -- pwd
 ```
 
 The CLI contains no provider credentials. Release binaries can be built and
-signed as ordinary Rust executables.
+signed as ordinary Rust executables. macOS packages also contain the separately
+signed Apple Intelligence helper, built by `scripts/build-apple-intelligence-helper.sh`.

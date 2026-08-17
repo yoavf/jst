@@ -1,16 +1,17 @@
 mod installation;
 mod safety;
 
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, ValueEnum};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use jst_shared::{
-    CommandEffects, CommandPart, CommandRevision, ServerStatusResponse, TranslateRequest,
-    TranslateResponse,
+    build_system_prompt, build_user_prompt, CommandEffects, CommandPart, CommandRevision,
+    ServerStatusResponse, TranslateRequest, TranslateResponse,
 };
+use serde::Serialize;
 use std::fmt;
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -21,6 +22,18 @@ const INSTALLATION_ID_HEADER: &str = "x-jst-installation-id";
 const CONFIRMATION_WIDTH: usize = 88;
 const MAX_MANUAL_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
+const MAX_HELPER_ERROR_BYTES: usize = 8 * 1024;
+const APPLE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(90);
+const APPLE_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
+const APPLE_HELPER_NAME: &str = "jst-apple-intelligence";
+const APPLE_MODEL_NAME: &str = "Apple Intelligence (on-device)";
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+enum Provider {
+    #[default]
+    Server,
+    Apple,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -42,9 +55,13 @@ struct Cli {
     #[arg(long, conflicts_with = "interactive")]
     dry: bool,
 
-    /// Check server health, models, and aggregate usage
+    /// Check the selected provider
     #[arg(long, conflicts_with_all = ["yolo", "interactive", "dry", "prompt"])]
     status: bool,
+
+    /// Translation provider: hosted JST server or Apple Intelligence on this Mac
+    #[arg(long, value_enum, env = "JST_PROVIDER", default_value_t)]
+    provider: Provider,
 
     /// What you want to do, in plain English
     #[arg(required_unless_present = "status", num_args = 1.., trailing_var_arg = true)]
@@ -56,6 +73,7 @@ enum JstError {
     Network,
     Server(u16),
     LlmProvider,
+    AppleIntelligence(String),
     Deserialization,
     Other(String),
 }
@@ -72,6 +90,7 @@ impl fmt::Display for JstError {
                 "rate limit reached — slow down, or run your own jst server"
             ),
             JstError::LlmProvider => write!(f, "trouble reaching the LLM; try again in a moment"),
+            JstError::AppleIntelligence(message) => write!(f, "Apple Intelligence: {message}"),
             JstError::Server(code) => write!(
                 f,
                 "the jst server is having trouble (HTTP {code}); try again in a moment"
@@ -108,8 +127,10 @@ async fn run() -> Result<(), JstError> {
 
     let cli = Cli::parse();
     if cli.status {
-        let status = fetch_server_status().await?;
-        return print_server_status(&status);
+        return match cli.provider {
+            Provider::Server => print_server_status(&fetch_server_status().await?),
+            Provider::Apple => print_apple_intelligence_status().await,
+        };
     }
 
     let input = cli.prompt.join(" ");
@@ -122,9 +143,10 @@ async fn run() -> Result<(), JstError> {
         ));
     }
 
-    let response = translate_with_spinner(&input, interactive, None, use_color).await?;
+    let response =
+        translate_with_spinner(&input, interactive, None, use_color, cli.provider).await?;
     if interactive {
-        return review_command(&input, response, false, use_color).await;
+        return review_command(&input, response, false, use_color, cli.provider).await;
     }
 
     let command = validated_command(&response)?;
@@ -168,6 +190,7 @@ async fn translate_with_spinner(
     explain: bool,
     revision: Option<CommandRevision>,
     use_color: bool,
+    provider: Provider,
 ) -> Result<TranslateResponse, JstError> {
     let spinner = if use_color {
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
@@ -191,7 +214,7 @@ async fn translate_with_spinner(
         None
     };
 
-    let result = translate(input, explain, revision).await;
+    let result = translate(input, explain, revision, provider).await;
 
     if let Some((handle, stop_tx)) = spinner {
         let _ = stop_tx.send(());
@@ -207,6 +230,7 @@ async fn translate(
     input: &str,
     explain: bool,
     revision: Option<CommandRevision>,
+    provider: Provider,
 ) -> Result<TranslateResponse, JstError> {
     let request = TranslateRequest {
         input: input.to_string(),
@@ -215,6 +239,13 @@ async fn translate(
         explain,
         revision,
     };
+    match provider {
+        Provider::Server => translate_with_server(request).await,
+        Provider::Apple => translate_with_apple_intelligence(request).await,
+    }
+}
+
+async fn translate_with_server(request: TranslateRequest) -> Result<TranslateResponse, JstError> {
     let api_url = std::env::var("JST_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
     let client = http_client(Duration::from_secs(30))?;
     let installation_id =
@@ -238,6 +269,278 @@ async fn translate(
     }
 
     serde_json::from_str(&body).map_err(|_| JstError::Deserialization)
+}
+
+#[derive(Serialize)]
+struct AppleIntelligenceRequest {
+    #[serde(rename = "systemPrompt")]
+    system_prompt: String,
+    #[serde(rename = "userPrompt")]
+    user_prompt: String,
+    explain: bool,
+}
+
+async fn translate_with_apple_intelligence(
+    request: TranslateRequest,
+) -> Result<TranslateResponse, JstError> {
+    ensure_apple_intelligence_supported()?;
+
+    let helper = apple_helper_path()?;
+    let input = serde_json::to_vec(&AppleIntelligenceRequest {
+        system_prompt: build_system_prompt(
+            request.os.as_deref(),
+            request.shell.as_deref(),
+            request.explain,
+        ),
+        user_prompt: build_user_prompt(&request.input, request.revision.as_ref()),
+        explain: request.explain,
+    })
+    .map_err(|_| JstError::Other("could not encode Apple Intelligence request".to_string()))?;
+    let output = run_apple_helper(
+        helper,
+        &[],
+        Some(&input),
+        MAX_RESPONSE_BYTES,
+        APPLE_TRANSLATION_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(JstError::AppleIntelligence(helper_error_message(
+            &output.stderr,
+        )));
+    }
+
+    let response = serde_json::from_slice(&output.stdout).map_err(|_| {
+        JstError::AppleIntelligence("returned an invalid structured response".to_string())
+    })?;
+    validate_apple_response(response)
+}
+
+fn validate_apple_response(mut response: TranslateResponse) -> Result<TranslateResponse, JstError> {
+    if response.command.is_empty() || response.command.len() > MAX_MANUAL_COMMAND_BYTES {
+        return Err(JstError::AppleIntelligence(
+            "returned an invalid command".to_string(),
+        ));
+    }
+    if response.explanation.len() > 1024 {
+        return Err(JstError::AppleIntelligence(
+            "returned an invalid explanation".to_string(),
+        ));
+    }
+    if response.parts.len() > 8 {
+        response.parts.clear();
+    }
+    Ok(response)
+}
+
+async fn print_apple_intelligence_status() -> Result<(), JstError> {
+    ensure_apple_intelligence_supported()?;
+    let output = run_apple_helper(
+        apple_helper_path()?,
+        &["--status"],
+        None,
+        MAX_STATUS_RESPONSE_BYTES,
+        APPLE_STATUS_TIMEOUT,
+    )
+    .await?;
+    if !output.status.success() {
+        return Err(JstError::AppleIntelligence(helper_error_message(
+            &output.stderr,
+        )));
+    }
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| {
+        JstError::AppleIntelligence("returned an invalid status response".to_string())
+    })?;
+    let availability = status
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            JstError::AppleIntelligence("returned an invalid status response".to_string())
+        })?;
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "Provider: Apple Intelligence")
+        .and_then(|_| writeln!(stdout, "Model: {APPLE_MODEL_NAME}"))
+        .and_then(|_| writeln!(stdout, "Availability: {}", terminal_safe(availability)))
+        .and_then(|_| writeln!(stdout, "Network: not used"))
+        .map_err(|error| JstError::Other(format!("{error}")))
+}
+
+struct AppleHelperOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+async fn run_apple_helper(
+    helper: PathBuf,
+    arguments: &[&str],
+    input: Option<&[u8]>,
+    stdout_limit: usize,
+    timeout: Duration,
+) -> Result<AppleHelperOutput, JstError> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut command = tokio::process::Command::new(helper);
+    command.args(arguments);
+    command.stdin(std::process::Stdio::piped());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+    command.kill_on_drop(true);
+    let mut child = command.spawn().map_err(|error| {
+        JstError::AppleIntelligence(format!("could not start the bundled helper: {error}"))
+    })?;
+    if let Some(input) = input {
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            JstError::AppleIntelligence("could not open the helper input".to_string())
+        })?;
+        stdin.write_all(input).await.map_err(|error| {
+            JstError::AppleIntelligence(format!(
+                "could not send the request to the helper: {error}"
+            ))
+        })?;
+    }
+    drop(child.stdin.take());
+    let stdout = child.stdout.take().ok_or_else(|| {
+        JstError::AppleIntelligence("could not open the helper output".to_string())
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        JstError::AppleIntelligence("could not open the helper error output".to_string())
+    })?;
+
+    let result = tokio::time::timeout(timeout, async {
+        tokio::try_join!(
+            read_limited_stream(stdout, stdout_limit),
+            read_limited_stream(stderr, MAX_HELPER_ERROR_BYTES),
+            child.wait(),
+        )
+    })
+    .await;
+    let (stdout, stderr, status) = match result {
+        Ok(Ok((stdout, stderr, status))) => (stdout, stderr, status),
+        Ok(Err(error)) => {
+            let _ = child.kill().await;
+            return Err(JstError::AppleIntelligence(format!(
+                "could not read the helper response: {error}"
+            )));
+        }
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err(JstError::AppleIntelligence(format!(
+                "did not respond within {} seconds",
+                timeout.as_secs()
+            )));
+        }
+    };
+    Ok(AppleHelperOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+async fn read_limited_stream<R>(mut stream: R, limit: usize) -> io::Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+
+    let mut output = Vec::new();
+    let mut chunk = [0; 8 * 1024];
+    loop {
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 {
+            return Ok(output);
+        }
+        if output.len() + read > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "helper response exceeded the allowed size",
+            ));
+        }
+        output.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn apple_helper_path() -> Result<PathBuf, JstError> {
+    if let Some(path) = std::env::var_os("JST_APPLE_INTELLIGENCE_HELPER") {
+        return Ok(PathBuf::from(path));
+    }
+    let executable = std::env::current_exe().map_err(|error| {
+        JstError::AppleIntelligence(format!("could not find the JST executable: {error}"))
+    })?;
+    let candidates = apple_helper_candidates(&executable);
+    if let Some(helper) = candidates.iter().find(|path| path.is_file()) {
+        return Ok(helper.clone());
+    }
+    let locations = candidates
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" or ");
+    Err(JstError::AppleIntelligence(format!(
+        "the bundled helper is missing at {locations}; reinstall the macOS package or set JST_APPLE_INTELLIGENCE_HELPER for a development build"
+    )))
+}
+
+fn ensure_apple_intelligence_supported() -> Result<(), JstError> {
+    if std::env::consts::OS != "macos" {
+        return Err(JstError::AppleIntelligence(
+            "is only supported on macOS 27.0 or later; use --provider server instead".to_string(),
+        ));
+    }
+
+    let output = Command::new("sw_vers")
+        // macOS can report a compatibility version to older processes. JST is
+        // built for macOS 27, so request the actual product version explicitly.
+        .env_remove("SYSTEM_VERSION_COMPAT")
+        .arg("-productVersion")
+        .output()
+        .map_err(|_| {
+            JstError::AppleIntelligence(
+                "requires macOS 27.0 or later, but the macOS version could not be determined"
+                    .to_string(),
+            )
+        })?;
+    let version = String::from_utf8_lossy(&output.stdout);
+    let Some(major) = macos_major_version(&version) else {
+        return Err(JstError::AppleIntelligence(
+            "requires macOS 27.0 or later, but the macOS version could not be determined"
+                .to_string(),
+        ));
+    };
+    if major < 27 {
+        return Err(JstError::AppleIntelligence(format!(
+            "requires macOS 27.0 or later (this Mac is running {}); use --provider server instead",
+            version.trim()
+        )));
+    }
+    Ok(())
+}
+
+fn macos_major_version(version: &str) -> Option<u32> {
+    version.trim().split('.').next()?.parse().ok()
+}
+
+fn apple_helper_candidates(executable: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![executable.with_file_name(APPLE_HELPER_NAME)];
+    if let Some(prefix) = executable.parent().and_then(Path::parent) {
+        candidates.push(prefix.join("libexec").join(APPLE_HELPER_NAME));
+    }
+    candidates
+}
+
+fn helper_error_message(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let message = stderr
+        .trim()
+        .strip_prefix("jst-apple-intelligence:")
+        .unwrap_or(stderr.trim())
+        .trim();
+    if message.is_empty() {
+        "the helper failed without an error message".to_string()
+    } else {
+        terminal_safe(message)
+    }
 }
 
 async fn fetch_server_status() -> Result<ServerStatusResponse, JstError> {
@@ -317,6 +620,7 @@ async fn review_command(
     mut response: TranslateResponse,
     mut explanation_visible: bool,
     use_color: bool,
+    provider: Provider,
 ) -> Result<(), JstError> {
     let width = terminal_width();
     let mut source_context = input.to_string();
@@ -391,7 +695,8 @@ async fn review_command(
                         instruction: instruction.clone(),
                     };
                     response =
-                        translate_with_spinner(input, true, Some(revision), use_color).await?;
+                        translate_with_spinner(input, true, Some(revision), use_color, provider)
+                            .await?;
                     source_context = format!("{input} {instruction}");
                     proposal_kind = ProposalKind::Revised;
                     eprintln!();
@@ -1217,16 +1522,18 @@ fn format_error(error: &JstError, color: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_command, contains_unsafe_terminal_character, format_detailed_explanation,
-        format_edit_prompt, format_error, format_proposal_explanation, format_review_prompt,
-        format_server_status, format_warning, indent_wrapped, next_char_end, parse_review_action,
-        previous_char_start, should_confirm, status_url_for, terminal_safe, Cli, JstError,
-        ProposalKind, ReviewAction,
+        apple_helper_candidates, clean_command, contains_unsafe_terminal_character,
+        format_detailed_explanation, format_edit_prompt, format_error, format_proposal_explanation,
+        format_review_prompt, format_server_status, format_warning, helper_error_message,
+        indent_wrapped, macos_major_version, next_char_end, parse_review_action,
+        previous_char_start, read_limited_stream, should_confirm, status_url_for, terminal_safe,
+        validate_apple_response, Cli, JstError, ProposalKind, Provider, ReviewAction,
     };
     use clap::{error::ErrorKind, CommandFactory, Parser};
     use jst_shared::{
         CommandEffects, CommandPart, ServerStatusResponse, StatusUsage, TranslateResponse,
     };
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn strips_markdown_fences() {
@@ -1317,6 +1624,24 @@ mod tests {
         let cli = Cli::try_parse_from(["jst", "--dry", "show", "current", "directory"])
             .expect("valid arguments");
         assert!(cli.dry);
+    }
+
+    #[test]
+    fn accepts_the_apple_provider_before_the_prompt() {
+        let cli = Cli::try_parse_from([
+            "jst",
+            "--provider",
+            "apple",
+            "--dry",
+            "show",
+            "the",
+            "current",
+            "directory",
+        ])
+        .expect("valid Apple provider invocation");
+
+        assert_eq!(cli.provider, Provider::Apple);
+        assert_eq!(cli.prompt.join(" "), "show the current directory");
     }
 
     #[test]
@@ -1421,6 +1746,88 @@ mod tests {
         assert!(should_confirm(false, &["local"], &[]));
         assert!(should_confirm(false, &[], &["model"]));
         assert!(!should_confirm(true, &["local"], &["model"]));
+    }
+
+    #[test]
+    fn limits_apple_responses_to_the_server_contract() {
+        let response = TranslateResponse {
+            command: "x".repeat(2 * 1024 + 1),
+            effects: CommandEffects::default(),
+            matches_request: true,
+            explanation: String::new(),
+            parts: Vec::new(),
+        };
+
+        assert!(validate_apple_response(response).is_err());
+    }
+
+    #[test]
+    fn falls_back_to_an_unstructured_explanation_when_there_are_too_many_parts() {
+        let response = TranslateResponse {
+            command: "pwd".to_string(),
+            effects: CommandEffects::default(),
+            matches_request: true,
+            explanation: "Print the current directory.".to_string(),
+            parts: (0..9)
+                .map(|_| CommandPart {
+                    fragment: "pwd".to_string(),
+                    meaning: "Print the current directory.".to_string(),
+                    source: "model".to_string(),
+                })
+                .collect(),
+        };
+
+        let response = validate_apple_response(response).expect("valid response");
+        assert!(response.parts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stops_reading_a_helper_stream_at_its_limit() {
+        use tokio::io::AsyncWriteExt;
+
+        let (mut writer, reader) = tokio::io::duplex(32);
+        let write = tokio::spawn(async move {
+            writer.write_all(b"123456789").await.expect("write stream");
+        });
+
+        assert!(read_limited_stream(reader, 8).await.is_err());
+        write.await.expect("writer task");
+    }
+
+    #[test]
+    fn removes_the_helper_error_prefix() {
+        assert_eq!(
+            helper_error_message(b"jst-apple-intelligence: model not enabled\n"),
+            "model not enabled"
+        );
+    }
+
+    #[test]
+    fn finds_the_helper_in_release_and_homebrew_layouts() {
+        let release = apple_helper_candidates(Path::new("/Applications/jst"));
+        assert_eq!(
+            release,
+            vec![
+                PathBuf::from("/Applications/jst-apple-intelligence"),
+                PathBuf::from("/libexec/jst-apple-intelligence"),
+            ]
+        );
+
+        let homebrew = apple_helper_candidates(Path::new("/opt/homebrew/Cellar/jst/0.3.2/bin/jst"));
+        assert_eq!(
+            homebrew,
+            vec![
+                PathBuf::from("/opt/homebrew/Cellar/jst/0.3.2/bin/jst-apple-intelligence"),
+                PathBuf::from("/opt/homebrew/Cellar/jst/0.3.2/libexec/jst-apple-intelligence"),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_macos_major_versions_for_the_apple_preflight() {
+        assert_eq!(macos_major_version("27.0\n"), Some(27));
+        assert_eq!(macos_major_version("26.4"), Some(26));
+        assert_eq!(macos_major_version("not a version"), None);
     }
 
     #[test]
