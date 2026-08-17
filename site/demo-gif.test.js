@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { demoFileAt, demoRedirect } from "../functions/demo.gif.js";
+import { demoFileAt, demoRedirect } from "../docs/functions/demo.gif.js";
 
 test("the demo endpoint can select every recorded GIF", () => {
   assert.equal(demoFileAt(0), "changed-today.gif");
