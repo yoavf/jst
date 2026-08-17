@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { demoFileAt, demoRedirect } from "../docs/functions/demo.gif.js";
+import { demoFileAt, demoRedirect } from "../workers/demo-gif.js";
 
 test("the demo endpoint can select every recorded GIF", () => {
   assert.equal(demoFileAt(0), "changed-today.gif");
@@ -15,18 +14,6 @@ test("the demo endpoint redirects without allowing the selection to be cached", 
   const response = demoRedirect(2);
 
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get("Location"), "/demos/largest-files.gif");
+  assert.equal(response.headers.get("Location"), "https://jst.sh/demos/largest-files.gif");
   assert.equal(response.headers.get("Cache-Control"), "no-store");
-});
-
-test("only the random demo route invokes a Pages Function", async () => {
-  const routes = JSON.parse(
-    await readFile(new URL("../docs/_routes.json", import.meta.url), "utf8"),
-  );
-
-  assert.deepEqual(routes, {
-    version: 1,
-    include: ["/demo.gif"],
-    exclude: [],
-  });
 });

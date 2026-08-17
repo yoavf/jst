@@ -7,7 +7,7 @@ jst find all files bigger than 500 mb in ~/downloads
 ```
 
 <p align="center">
-  <img src="https://jst-5mg.pages.dev/demo.gif" width="960" alt="A randomly selected jst terminal demo">
+  <img src="https://jst.sh/demo.gif" width="960" alt="A randomly selected jst terminal demo">
 </p>
 
 The demo above is randomly selected on each fresh image request. It is recorded

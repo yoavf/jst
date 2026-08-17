@@ -15,11 +15,13 @@ export function demoRedirect(index) {
     status: 302,
     headers: {
       "Cache-Control": "no-store",
-      Location: `/demos/${demoFileAt(index)}`,
+      Location: `https://jst.sh/demos/${demoFileAt(index)}`,
     },
   });
 }
 
-export function onRequestGet() {
-  return demoRedirect(Math.floor(Math.random() * DEMO_FILES.length));
-}
+export default {
+  fetch() {
+    return demoRedirect(Math.floor(Math.random() * DEMO_FILES.length));
+  },
+};
