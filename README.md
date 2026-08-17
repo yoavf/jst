@@ -7,10 +7,10 @@ jst find all files bigger than 500 mb in ~/downloads
 ```
 
 <p align="center">
-  <img src="https://jst.sh/demo.gif" width="960" alt="A randomly selected jst terminal demo">
+  <img src="https://jst.sh/demos/clear-port-8080.gif" width="960" alt="JST safely clearing a process from port 8080">
 </p>
 
-<p align="center"><em>Reload for another random demo</em></p>
+<p align="center"><a href="https://jst.sh">See more demos or try JST in the browser sandbox</a></p>
 
 ## Install
 
