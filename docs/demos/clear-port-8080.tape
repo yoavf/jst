@@ -17,7 +17,6 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 34ms
 Set Framerate 30
 Set PlaybackSpeed 1.15
-Set CursorBlink false
 
 Hide
 Type `unset NO_COLOR; export COLUMNS=80; export PS1=$'\n❯ '`
