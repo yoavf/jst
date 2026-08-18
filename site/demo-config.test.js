@@ -59,6 +59,11 @@ test("offers mobile visitors a save-for-later install flow", () => {
   assert.match(pageStyles, /@media \(max-width: 640px\)[\s\S]*\.mobile-reminder\s*{[\s\S]*display: block;/);
 });
 
+test("links macOS visitors to the on-device Apple Intelligence instructions", () => {
+  assert.match(pageMarkup, /On macOS 27 beta, run <code>jst<\/code> with Apple Intelligence entirely on-device/);
+  assert.match(pageMarkup, /href="https:\/\/github\.com\/yoavf\/jst#apple-intelligence-macos-27-beta"/);
+});
+
 test("hides the example switcher whenever the demo dialog is open", () => {
   assert.match(
     pageStyles,
