@@ -62,7 +62,8 @@ test("offers mobile visitors a save-for-later install flow", () => {
 
 test("links macOS visitors to the on-device Apple Intelligence instructions", () => {
   assert.match(pageMarkup, /class="usage-footnote"/);
-  assert.match(pageMarkup, /On macOS 27 beta, Apple Intelligence runs locally—private, but experimental/);
+  assert.match(pageMarkup, /On macOS 27 beta, Apple Intelligence runs locally—private, but not yet reliable enough to replace hosted/);
+  assert.match(pageMarkup, /Benchmark <span aria-hidden="true">→<\/span>/);
   assert.match(pageMarkup, /href="https:\/\/github\.com\/yoavf\/jst#apple-intelligence-macos-27-beta"/);
   assert.match(pageStyles, /\.usage-footnote\s*{[\s\S]*grid-column: 2 \/ -1;[\s\S]*font-size: 0\.78rem;/);
 });
