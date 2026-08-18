@@ -83,6 +83,11 @@ A fresh hosted proxy run averaged 3.80s (3.55s median) with Phi-4 primary and
 Gemma fallback. These results are directional, not a guarantee; the hosted
 provider remains the default because it is more reliable.
 
+Apple’s main weaknesses were refusing explicit ordinary operations, using an
+incorrect Homebrew path, wrong process limits, incorrect archive/JSON commands,
+and several incorrect filesystem queries. Its self-reported match score was
+15/20, but manual review found only 4/20 fully correct.
+
 ```sh
 jst --provider apple --dry show the current directory
 jst --provider apple -i find files larger than 500 MB
