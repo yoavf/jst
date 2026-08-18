@@ -69,6 +69,20 @@ On macOS 27.0 beta or later, use the on-device Apple Intelligence model instead
 of the hosted JST server. It is opt-in; the hosted provider remains JST's
 unchanged default:
 
+The built-in model is more private but less reliable on command effects than the
+hosted models. In the full 20-case macOS/zsh benchmark, every provider parsed
+20/20 responses, but effect checks differed:
+
+| Provider | Parsed | Effect checks |
+| --- | ---: | ---: |
+| Apple Intelligence | 20/20 | 11/20 |
+| Hosted Phi-4 baseline | 20/20 | 19/20 |
+| Hosted Gemma baseline | 20/20 | 20/20 |
+
+A fresh hosted proxy run averaged 3.80s (3.55s median) with Phi-4 primary and
+Gemma fallback. These results are directional, not a guarantee; the hosted
+provider remains the default because it is more reliable.
+
 ```sh
 jst --provider apple --dry show the current directory
 jst --provider apple -i find files larger than 500 MB

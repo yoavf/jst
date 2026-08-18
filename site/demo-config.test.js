@@ -40,7 +40,7 @@ test("loads one versioned browser toolbox bundle in both page and worker", () =>
 });
 
 test("cache-busts every layer of the sandbox runtime", () => {
-  assert.match(pageMarkup, /styles\.css\?v=28/);
+  assert.match(pageMarkup, /styles\.css\?v=29/);
   assert.match(pageMarkup, /script\.js\?v=47/);
   assert.match(pageScript, /demo-runtime\.js\?v=4/);
   assert.match(runtimeBundle, /demo-sandbox\.html\?v=15/);
@@ -62,7 +62,7 @@ test("offers mobile visitors a save-for-later install flow", () => {
 
 test("links macOS visitors to the on-device Apple Intelligence instructions", () => {
   assert.match(pageMarkup, /usage-option usage-option--apple/);
-  assert.match(pageMarkup, /On macOS 27 beta, run <code>jst<\/code> locally—no hosted server or API key/);
+  assert.match(pageMarkup, /On macOS 27 beta, use built-in Apple Intelligence locally—private, but less reliable than hosted <code>jst<\/code>/);
   assert.match(pageMarkup, /<code class="usage-option-command">jst --provider apple<\/code>/);
   assert.match(pageMarkup, /href="https:\/\/github\.com\/yoavf\/jst#apple-intelligence-macos-27-beta"/);
   assert.match(pageStyles, /\.usage-alternatives\s*{[\s\S]*display: grid;[\s\S]*gap: 0\.7rem;/);

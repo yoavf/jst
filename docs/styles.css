@@ -1819,6 +1819,10 @@ h3 {
   padding-top: 0;
 }
 
+.usage-option--hosted {
+  align-self: center;
+}
+
 .last-note {
   padding-bottom: clamp(10rem, 16vw, 16rem);
 }
@@ -2592,6 +2596,10 @@ h3 {
 
   .usage-option {
     margin-top: 1rem;
+  }
+
+  .usage-option--hosted {
+    align-self: start;
   }
 
   .usage-alternatives {
