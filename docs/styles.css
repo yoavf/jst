@@ -1754,6 +1754,11 @@ h3 {
   max-width: 28rem;
 }
 
+.usage-alternatives {
+  display: grid;
+  gap: 0.7rem;
+}
+
 .usage-privacy-link {
   border: 0;
   padding: 0;
@@ -1780,7 +1785,7 @@ h3 {
   transform: rotate(-2deg);
 }
 
-.usage-option--byok > code {
+.usage-option-command {
   display: block;
   overflow-x: auto;
   margin-top: 1.8rem;
@@ -1797,6 +1802,21 @@ h3 {
   font-family: "Kalam", cursive;
   font-size: 1.6rem;
   transform: rotate(-8deg);
+}
+
+.or-mark--between {
+  align-self: start;
+  margin-top: 4rem;
+}
+
+.or-mark--stacked {
+  align-self: start;
+  justify-self: start;
+  margin-block: 0.2rem -0.7rem;
+}
+
+.usage-option--apple {
+  padding-top: 0;
 }
 
 .last-note {
@@ -2309,10 +2329,10 @@ h3 {
 
   .usage-heading {
     grid-column: 1 / -1;
-    margin-bottom: 3rem;
+    margin-bottom: 1.5rem;
   }
 
-  .or-mark {
+  .or-mark:not(.or-mark--stacked) {
     display: none;
   }
 }
@@ -2563,10 +2583,23 @@ h3 {
 
   .usage-sheet {
     grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .usage-heading {
+    margin-bottom: 0;
   }
 
   .usage-option {
-    margin-top: 2.5rem;
+    margin-top: 1rem;
+  }
+
+  .usage-alternatives {
+    margin-top: 1rem;
+  }
+
+  .usage-alternatives .usage-option {
+    margin-top: 0;
   }
 
 }
