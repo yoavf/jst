@@ -1124,8 +1124,16 @@ const REMINDER_SHARE_DATA = {
   text: "Install jst when you’re back at your computer.",
   url: REMINDER_URL,
 };
+let reminderCopyResetTimer = null;
+
+function clearReminderCopyResetTimer() {
+  if (reminderCopyResetTimer === null) return;
+  window.clearTimeout(reminderCopyResetTimer);
+  reminderCopyResetTimer = null;
+}
 
 function openReminderDialog() {
+  clearReminderCopyResetTimer();
   reminderStatus.textContent = "";
   reminderCopyState.textContent = "copy";
   reminderDialog?.showModal();
@@ -1154,6 +1162,7 @@ reminderCloseButton?.addEventListener("click", closeReminderDialog);
 reminderDialog?.addEventListener("click", (event) => {
   if (event.target === reminderDialog) closeReminderDialog();
 });
+reminderDialog?.addEventListener("close", clearReminderCopyResetTimer);
 
 window.visualViewport?.addEventListener("resize", syncReminderDialogViewport);
 window.visualViewport?.addEventListener("scroll", syncReminderDialogViewport);
@@ -1173,12 +1182,14 @@ reminderShareButton?.addEventListener("click", async () => {
 });
 
 reminderCopyButton?.addEventListener("click", async () => {
+  clearReminderCopyResetTimer();
   reminderStatus.textContent = "";
   try {
     await navigator.clipboard.writeText(REMINDER_URL);
     reminderCopyState.textContent = "copied";
-    window.setTimeout(() => {
+    reminderCopyResetTimer = window.setTimeout(() => {
       reminderCopyState.textContent = "copy";
+      reminderCopyResetTimer = null;
     }, 1800);
   } catch {
     reminderCopyState.textContent = "couldn’t copy";
