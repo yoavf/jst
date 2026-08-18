@@ -118,6 +118,13 @@ const mapElement = document.querySelector(".translation-map");
 const privacyDialog = document.querySelector("#privacy-dialog");
 const privacyOpenButtons = document.querySelectorAll("[data-privacy-open]");
 const privacyCloseButton = document.querySelector("[data-privacy-close]");
+const reminderDialog = document.querySelector("#reminder-dialog");
+const reminderOpenButton = document.querySelector("[data-reminder-open]");
+const reminderCloseButton = document.querySelector("[data-reminder-close]");
+const reminderShareButton = document.querySelector("[data-reminder-share]");
+const reminderCopyButton = document.querySelector("[data-reminder-copy]");
+const reminderCopyState = document.querySelector(".reminder-copy-state");
+const reminderStatus = document.querySelector(".reminder-status");
 const tryDemoButton = document.querySelector(".try-demo");
 const tryDemoLabel = document.querySelector(".try-demo-label");
 const demoForm = document.querySelector("#demo-form");
@@ -1108,6 +1115,58 @@ copyButton?.addEventListener("click", async () => {
     }, 1800);
   } catch {
     copyState.textContent = "select + copy";
+  }
+});
+
+const REMINDER_URL = "https://jst.sh/#install";
+const REMINDER_SHARE_DATA = {
+  title: "Install jst",
+  text: "Install jst when you’re back at your computer.",
+  url: REMINDER_URL,
+};
+
+function openReminderDialog() {
+  reminderStatus.textContent = "";
+  reminderCopyState.textContent = "copy";
+  reminderDialog?.showModal();
+}
+
+function closeReminderDialog() {
+  reminderDialog?.close();
+}
+
+reminderOpenButton?.addEventListener("click", openReminderDialog);
+reminderCloseButton?.addEventListener("click", closeReminderDialog);
+
+reminderDialog?.addEventListener("click", (event) => {
+  if (event.target === reminderDialog) closeReminderDialog();
+});
+
+if (reminderShareButton && typeof navigator.share !== "function") {
+  reminderShareButton.hidden = true;
+}
+
+reminderShareButton?.addEventListener("click", async () => {
+  reminderStatus.textContent = "";
+  try {
+    await navigator.share(REMINDER_SHARE_DATA);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    reminderStatus.textContent = "Sharing didn’t open. You can email or copy the link instead.";
+  }
+});
+
+reminderCopyButton?.addEventListener("click", async () => {
+  reminderStatus.textContent = "";
+  try {
+    await navigator.clipboard.writeText(REMINDER_URL);
+    reminderCopyState.textContent = "copied";
+    window.setTimeout(() => {
+      reminderCopyState.textContent = "copy";
+    }, 1800);
+  } catch {
+    reminderCopyState.textContent = "couldn’t copy";
+    reminderStatus.textContent = REMINDER_URL;
   }
 });
 

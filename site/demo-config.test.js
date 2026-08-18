@@ -40,11 +40,20 @@ test("loads one versioned browser toolbox bundle in both page and worker", () =>
 });
 
 test("cache-busts every layer of the sandbox runtime", () => {
-  assert.match(pageMarkup, /script\.js\?v=44/);
+  assert.match(pageMarkup, /script\.js\?v=45/);
   assert.match(pageScript, /demo-runtime\.js\?v=4/);
   assert.match(runtimeBundle, /demo-sandbox\.html\?v=15/);
   assert.match(sandboxMarkup, /demo-sandbox\.js\?v=15/);
   assert.match(sandboxBundle, /demo-sandbox\.js\?v=15/);
+});
+
+test("offers mobile visitors a save-for-later install flow", () => {
+  assert.match(pageMarkup, /Save <code>jst<\/code> for later/);
+  assert.match(pageMarkup, /Email myself the link/);
+  assert.match(pageMarkup, /mailto:\?subject=Install%20jst/);
+  assert.match(pageScript, /navigator\.share\(REMINDER_SHARE_DATA\)/);
+  assert.match(pageScript, /navigator\.clipboard\.writeText\(REMINDER_URL\)/);
+  assert.match(pageStyles, /@media \(max-width: 640px\)[\s\S]*\.mobile-reminder\s*{[\s\S]*display: block;/);
 });
 
 test("hides the example switcher whenever the demo dialog is open", () => {

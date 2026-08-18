@@ -546,6 +546,211 @@ h1 {
   max-width: 100%;
 }
 
+.mobile-reminder {
+  display: none;
+}
+
+.mobile-reminder-open {
+  position: relative;
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.65rem 1rem;
+  border: 2px solid var(--ink);
+  border-radius: 0.2rem;
+  padding: 2.15rem 1rem 1rem;
+  color: var(--paper);
+  background: var(--blue);
+  box-shadow: 4px 5px 0 var(--orange);
+  cursor: pointer;
+  font-family: "Gabarito", sans-serif;
+  font-size: 1.2rem;
+  font-weight: 750;
+  text-align: left;
+  transform: rotate(-0.35deg);
+}
+
+.mobile-reminder-open code {
+  color: inherit;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.88em;
+}
+
+.mobile-reminder-open > span:last-child {
+  color: #ffd0bd;
+  font-family: "Kalam", cursive;
+  font-size: 1.65rem;
+  line-height: 0.8;
+}
+
+.mobile-reminder-kicker {
+  position: absolute;
+  top: 0.72rem;
+  left: 1rem;
+  color: #ffd0bd;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mobile-reminder-open:hover,
+.mobile-reminder-open:focus-visible {
+  box-shadow: 2px 3px 0 var(--orange);
+  outline: 3px solid rgb(235 77 32 / 22%);
+  outline-offset: 3px;
+  transform: rotate(-0.35deg) translateY(2px);
+}
+
+.mobile-reminder > p {
+  margin: 0.85rem 0.25rem 0;
+  color: var(--blue-dark);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.reminder-dialog {
+  width: min(33rem, calc(100% - 1.5rem));
+  max-width: none;
+  max-height: calc(100svh - 1.5rem);
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  overflow: visible;
+}
+
+.reminder-dialog::backdrop {
+  background: rgb(12 18 35 / 68%);
+  backdrop-filter: blur(3px);
+}
+
+.reminder-sheet {
+  position: relative;
+  max-height: calc(100svh - 1.5rem);
+  border: 2px solid var(--ink);
+  border-radius: 0.24rem;
+  padding: 3.5rem clamp(1.25rem, 5vw, 2.25rem) 2rem;
+  background:
+    linear-gradient(96deg, transparent 0 48%, rgb(24 23 22 / 3%) 50%, transparent 52%),
+    repeating-radial-gradient(circle at 0 0, rgb(20 18 14 / 2.4%) 0 0.6px, transparent 0.8px 4px),
+    var(--paper);
+  box-shadow: 7px 8px 0 var(--blue);
+  overflow-y: auto;
+}
+
+.reminder-close {
+  position: absolute;
+  top: 1rem;
+  right: 1.1rem;
+  border: 0;
+  border-bottom: 2px solid var(--blue);
+  padding: 0.1rem 0;
+  color: var(--blue);
+  background: transparent;
+  cursor: pointer;
+  font-family: "Kalam", cursive;
+  font-size: 0.95rem;
+}
+
+.reminder-close:hover,
+.reminder-close:focus-visible {
+  border-color: var(--orange);
+}
+
+.reminder-kicker {
+  margin: 0 0 0.8rem;
+  color: var(--orange);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.reminder-dialog h2 {
+  max-width: 25rem;
+  margin: 0 0 1rem;
+  color: var(--blue);
+  font-family: "Archivo Black", sans-serif;
+  font-size: clamp(2.5rem, 11vw, 4.2rem);
+  font-weight: 400;
+  letter-spacing: -0.055em;
+  line-height: 0.91;
+}
+
+.reminder-intro {
+  max-width: 25rem;
+  margin: 0 0 1.5rem;
+  font-size: 1.03rem;
+  font-weight: 600;
+  line-height: 1.42;
+}
+
+.reminder-actions {
+  border-top: 2px solid var(--ink);
+}
+
+.reminder-action {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0;
+  border-bottom: 1px solid rgb(24 23 22 / 22%);
+  padding: 0.95rem 0.15rem;
+  color: var(--blue-dark);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+}
+
+.reminder-action[hidden] {
+  display: none;
+}
+
+.reminder-action:hover,
+.reminder-action:focus-visible {
+  color: var(--orange);
+  outline: 0;
+}
+
+.reminder-action--primary {
+  color: var(--ink);
+}
+
+.reminder-action > span:last-child {
+  color: var(--orange);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.reminder-status {
+  min-height: 1.25rem;
+  margin: 0.65rem 0 0;
+  color: var(--orange);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.reminder-download {
+  display: inline-block;
+  margin-top: 0.65rem;
+  color: var(--blue-dark);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
 .platform-downloads {
   display: inline-block;
   margin: 0.75rem 0.35rem 0;
@@ -2271,6 +2476,15 @@ h3 {
   .last-note-inner {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .install-block {
+    display: none;
+  }
+
+  .mobile-reminder {
+    display: block;
+    width: 100%;
   }
 
   .install-command {
