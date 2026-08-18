@@ -1,6 +1,7 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
 import { isAllowedDemoCommand } from "./assets/demo-command-v6.js";
 import { publicStatsDays, statsTotalSizeStep } from "./stats-display.js?v=3";
+import { createReminderCopyState } from "./reminder-copy-state.js?v=1";
 
 const examples = [
   {
@@ -1124,18 +1125,17 @@ const REMINDER_SHARE_DATA = {
   text: "Install jst when you’re back at your computer.",
   url: REMINDER_URL,
 };
-let reminderCopyResetTimer = null;
-
-function clearReminderCopyResetTimer() {
-  if (reminderCopyResetTimer === null) return;
-  window.clearTimeout(reminderCopyResetTimer);
-  reminderCopyResetTimer = null;
-}
+const reminderCopy = createReminderCopyState({
+  clearTimeout: window.clearTimeout.bind(window),
+  setTimeout: window.setTimeout.bind(window),
+  setState: (state) => {
+    reminderCopyState.textContent = state;
+  },
+});
 
 function openReminderDialog() {
-  clearReminderCopyResetTimer();
+  reminderCopy.reset();
   reminderStatus.textContent = "";
-  reminderCopyState.textContent = "copy";
   reminderDialog?.showModal();
   syncReminderDialogViewport();
 }
@@ -1162,7 +1162,7 @@ reminderCloseButton?.addEventListener("click", closeReminderDialog);
 reminderDialog?.addEventListener("click", (event) => {
   if (event.target === reminderDialog) closeReminderDialog();
 });
-reminderDialog?.addEventListener("close", clearReminderCopyResetTimer);
+reminderDialog?.addEventListener("close", () => reminderCopy.reset());
 
 window.visualViewport?.addEventListener("resize", syncReminderDialogViewport);
 window.visualViewport?.addEventListener("scroll", syncReminderDialogViewport);
@@ -1182,17 +1182,13 @@ reminderShareButton?.addEventListener("click", async () => {
 });
 
 reminderCopyButton?.addEventListener("click", async () => {
-  clearReminderCopyResetTimer();
+  const copyOperation = reminderCopy.begin();
   reminderStatus.textContent = "";
   try {
     await navigator.clipboard.writeText(REMINDER_URL);
-    reminderCopyState.textContent = "copied";
-    reminderCopyResetTimer = window.setTimeout(() => {
-      reminderCopyState.textContent = "copy";
-      reminderCopyResetTimer = null;
-    }, 1800);
+    reminderCopy.succeed(copyOperation);
   } catch {
-    reminderCopyState.textContent = "couldn’t copy";
+    if (!reminderCopy.fail(copyOperation)) return;
     reminderStatus.textContent = REMINDER_URL;
   }
 });
