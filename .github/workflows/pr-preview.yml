@@ -4,6 +4,10 @@ on:
   pull_request:
     paths-ignore:
       - "docs/**"
+      - "site/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
 
 permissions:
   contents: read
