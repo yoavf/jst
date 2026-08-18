@@ -1129,10 +1129,23 @@ function openReminderDialog() {
   reminderStatus.textContent = "";
   reminderCopyState.textContent = "copy";
   reminderDialog?.showModal();
+  syncReminderDialogViewport();
 }
 
 function closeReminderDialog() {
   reminderDialog?.close();
+}
+
+function syncReminderDialogViewport() {
+  if (!reminderDialog?.open || !window.visualViewport) return;
+  reminderDialog.style.setProperty(
+    "--reminder-viewport-width",
+    `${window.visualViewport.width}px`,
+  );
+  reminderDialog.style.setProperty(
+    "--reminder-viewport-left",
+    `${window.visualViewport.offsetLeft}px`,
+  );
 }
 
 reminderOpenButton?.addEventListener("click", openReminderDialog);
@@ -1141,6 +1154,9 @@ reminderCloseButton?.addEventListener("click", closeReminderDialog);
 reminderDialog?.addEventListener("click", (event) => {
   if (event.target === reminderDialog) closeReminderDialog();
 });
+
+window.visualViewport?.addEventListener("resize", syncReminderDialogViewport);
+window.visualViewport?.addEventListener("scroll", syncReminderDialogViewport);
 
 if (reminderShareButton && typeof navigator.share !== "function") {
   reminderShareButton.hidden = true;

@@ -612,9 +612,10 @@ h1 {
 }
 
 .reminder-dialog {
-  width: min(33rem, calc(100% - 1.5rem));
+  width: min(33rem, calc(var(--reminder-viewport-width, 100vw) - 3rem));
   max-width: none;
   max-height: calc(100svh - 1.5rem);
+  margin-inline: calc(var(--reminder-viewport-left, 0px) + 1rem) auto;
   border: 0;
   padding: 0;
   color: var(--ink);
@@ -731,6 +732,11 @@ h1 {
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
+}
+
+.reminder-action > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .reminder-status {
