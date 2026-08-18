@@ -31,8 +31,8 @@
       href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Gabarito:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@300;400;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=25" />
-    <script type="module" src="./script.js?v=46"></script>
+    <link rel="stylesheet" href="./styles.css?v=30" />
+    <script type="module" src="./script.js?v=47"></script>
     <script src="https://cdn.counter.dev/script.js" data-id="4fbcc31f-5f37-40c3-8788-8fb56c79209b" data-utcoffset="3" crossorigin="anonymous"></script>
   </head>
   <body>
@@ -145,6 +145,14 @@
             </button>
             <a class="platform-downloads" href="https://github.com/yoavf/jst/releases/latest">Linux &amp; Windows binaries <span aria-hidden="true">→</span></a>
           </div>
+          <div class="mobile-reminder">
+            <button class="mobile-reminder-open" type="button" aria-haspopup="dialog" data-reminder-open>
+              <span class="mobile-reminder-kicker">on your phone?</span>
+              <span>Save <code>jst</code> for later</span>
+              <span aria-hidden="true">↗</span>
+            </button>
+            <p>Send the install link to wherever you’ll find it at your computer.</p>
+          </div>
         </div>
 
         <a class="down-cue" href="#notes" aria-label="Continue to field notes">↓</a>
@@ -168,7 +176,7 @@
         </div>
       </section>
 
-      <section class="quick-start" aria-labelledby="quick-start-title">
+      <section class="quick-start" id="install" aria-labelledby="quick-start-title">
         <div class="wrap quick-start-sheet">
           <div class="quick-start-heading">
             <p class="folio">02 / getting started</p>
@@ -255,14 +263,16 @@
             </p>
           </div>
 
-          <span class="or-mark" aria-hidden="true">or</span>
+          <span class="or-mark or-mark--between" aria-hidden="true">or</span>
 
           <div class="usage-option usage-option--byok">
             <p class="option-label">BYOK</p>
             <h3>Bring your own key.</h3>
             <p>Run the open-source server with an OpenAI-compatible provider, then point <code>jst</code> at it.</p>
-            <code>JST_API_URL=http://localhost:8080/translate</code>
+            <code class="usage-option-command">JST_API_URL=http://localhost:8080/translate</code>
           </div>
+
+          <p class="usage-footnote"><sup>*</sup> On macOS 27 beta, Apple Intelligence runs locally—private, but not yet reliable enough to replace hosted <code>jst</code>. <a href="https://github.com/yoavf/jst#apple-intelligence-macos-27-beta">Benchmark <span aria-hidden="true">→</span></a></p>
         </div>
       </section>
 
@@ -344,6 +354,34 @@
         </header>
         <div class="demo-dialog-mount" id="demo-dialog-mount"></div>
       </section>
+    </dialog>
+
+    <dialog class="reminder-dialog" id="reminder-dialog" aria-labelledby="reminder-title">
+      <div class="reminder-sheet">
+        <button class="reminder-close" type="button" data-reminder-close aria-label="Close save for later dialog">close <span aria-hidden="true">×</span></button>
+        <p class="reminder-kicker">phone now / terminal later</p>
+        <h2 id="reminder-title">Pick this up at your computer.</h2>
+        <p class="reminder-intro">Send yourself the install page. No signup, no updates—just the link.</p>
+        <div class="reminder-actions">
+          <a
+            class="reminder-action reminder-action--primary"
+            href="mailto:?subject=Install%20jst%20on%20your%20computer&amp;body=Install%20jst%20when%20you%E2%80%99re%20back%20at%20your%20computer%3A%0A%0Ahttps%3A%2F%2Fjst.sh%2F%23install%0A%0AHomebrew%3A%20brew%20install%20yoavf%2Ftap%2Fjst"
+          >
+            <span>Email myself the link</span>
+            <span aria-hidden="true">→</span>
+          </a>
+          <button class="reminder-action" type="button" data-reminder-share>
+            <span>Share another way</span>
+            <span aria-hidden="true">↗</span>
+          </button>
+          <button class="reminder-action" type="button" data-reminder-copy>
+            <span>Copy install link</span>
+            <span class="reminder-copy-state" aria-live="polite">copy</span>
+          </button>
+        </div>
+        <p class="reminder-status" aria-live="polite"></p>
+        <a class="reminder-download" href="https://github.com/yoavf/jst/releases/latest">View downloads anyway <span aria-hidden="true">→</span></a>
+      </div>
     </dialog>
 
     <dialog class="privacy-dialog" id="privacy-dialog" aria-labelledby="privacy-title">

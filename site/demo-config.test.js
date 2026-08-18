@@ -40,11 +40,32 @@ test("loads one versioned browser toolbox bundle in both page and worker", () =>
 });
 
 test("cache-busts every layer of the sandbox runtime", () => {
-  assert.match(pageMarkup, /script\.js\?v=46/);
+  assert.match(pageMarkup, /styles\.css\?v=30/);
+  assert.match(pageMarkup, /script\.js\?v=47/);
   assert.match(pageScript, /demo-runtime\.js\?v=4/);
   assert.match(runtimeBundle, /demo-sandbox\.html\?v=15/);
   assert.match(sandboxMarkup, /demo-sandbox\.js\?v=15/);
   assert.match(sandboxBundle, /demo-sandbox\.js\?v=15/);
+});
+
+test("offers mobile visitors a save-for-later install flow", () => {
+  assert.match(pageMarkup, /Save <code>jst<\/code> for later/);
+  assert.match(pageMarkup, /Email myself the link/);
+  assert.match(pageMarkup, /mailto:\?subject=Install%20jst/);
+  assert.match(pageScript, /navigator\.share\(REMINDER_SHARE_DATA\)/);
+  assert.match(pageScript, /navigator\.clipboard\.writeText\(REMINDER_URL\)/);
+  assert.match(pageScript, /createReminderCopyState/);
+  assert.match(pageScript, /window\.visualViewport\.width/);
+  assert.match(pageStyles, /--reminder-viewport-width/);
+  assert.match(pageStyles, /@media \(max-width: 640px\)[\s\S]*\.mobile-reminder\s*{[\s\S]*display: block;/);
+});
+
+test("links macOS visitors to the on-device Apple Intelligence instructions", () => {
+  assert.match(pageMarkup, /class="usage-footnote"/);
+  assert.match(pageMarkup, /On macOS 27 beta, Apple Intelligence runs locally—private, but not yet reliable enough to replace hosted/);
+  assert.match(pageMarkup, /Benchmark <span aria-hidden="true">→<\/span>/);
+  assert.match(pageMarkup, /href="https:\/\/github\.com\/yoavf\/jst#apple-intelligence-macos-27-beta"/);
+  assert.match(pageStyles, /\.usage-footnote\s*{[\s\S]*grid-column: 2 \/ -1;[\s\S]*font-size: 0\.78rem;/);
 });
 
 test("hides the example switcher whenever the demo dialog is open", () => {

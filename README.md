@@ -66,8 +66,12 @@ jst --dry show the current directory
 ### Apple Intelligence (macOS 27 beta)
 
 On macOS 27.0 beta or later, use the on-device Apple Intelligence model instead
-of the hosted JST server. It is opt-in; the hosted provider remains JST's
-unchanged default:
+of the hosted JST server. It is opt-in.
+
+Apple mode keeps requests on your Mac and needs no API key, but it is not yet
+reliable enough to replace hosted JST. In a 20-case macOS/zsh benchmark, Apple
+passed 11/20 effect checks and only 4/20 were fully correct on manual review;
+hosted Phi-4 and Gemma passed 19/20 and 20/20 respectively.
 
 ```sh
 jst --provider apple --dry show the current directory
