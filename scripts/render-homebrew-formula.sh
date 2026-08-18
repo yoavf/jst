@@ -33,6 +33,7 @@ class Jst < Formula
 
   def install
     bin.install "jst"
+    libexec.install "jst-apple-intelligence"
   end
 
   test do

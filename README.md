@@ -6,6 +6,12 @@ Run shell commands from natural-language requests:
 jst find all files bigger than 500 mb in ~/downloads
 ```
 
+<p align="center">
+  <img src="https://jst.sh/demos/clear-port-8080.gif" width="960" alt="JST safely clearing a process from port 8080">
+</p>
+
+<p align="center"><a href="https://jst.sh">See more demos or try JST in the browser sandbox</a></p>
+
 ## Install
 
 ### Homebrew
@@ -56,6 +62,51 @@ Use `--dry` to print a generated command and exit without running it:
 ```sh
 jst --dry show the current directory
 ```
+
+### Apple Intelligence (macOS 27 beta)
+
+On macOS 27.0 beta or later, use the on-device Apple Intelligence model instead
+of the hosted JST server. It is opt-in; the hosted provider remains JST's
+unchanged default:
+
+```sh
+jst --provider apple --dry show the current directory
+jst --provider apple -i find files larger than 500 MB
+jst --provider apple --status
+```
+
+If you use it regularly, set the provider once in your shell configuration:
+
+```sh
+export JST_PROVIDER=apple
+jst show the current directory
+```
+
+Use `--provider server` on an individual command to override that setting.
+
+This option requires a Mac and Apple Intelligence configuration for which the
+system model is available. `jst --provider apple --status` reports the model's
+availability before any translation. The request, generated command, and
+revision instructions stay on the Mac: this provider does not contact the JST
+server, consume its quota, or use an API key.
+
+On macOS 26 or earlier (and on non-macOS platforms), selecting Apple mode exits
+before launching the helper with a clear macOS-27 requirement. Run JST without
+the Apple provider, or use `--provider server`, to keep using the hosted model.
+
+Mac release archives include a `jst-apple-intelligence` companion executable;
+Linux and Windows archives do not. Homebrew installs it privately and wires it
+up automatically. For a manual macOS install, keep the two archive executables
+together in the same directory on your `PATH`:
+
+```sh
+install -m 755 jst-*/jst jst-*/jst-apple-intelligence ~/.local/bin/
+```
+
+The Rust CLI sends the companion a JSON request and receives a structured JSON
+response; the companion calls Apple's `FoundationModels` framework directly.
+This keeps the beta framework out of Rust and avoids maintaining Swift
+bindings. The hosted JST server is available on every supported platform.
 
 ### Review and refine
 
