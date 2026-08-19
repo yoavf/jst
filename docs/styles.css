@@ -2442,6 +2442,7 @@ h3 {
 
   .translation {
     width: 100%;
+    min-height: 18rem;
     padding-right: 1rem;
     padding-left: 1rem;
   }
