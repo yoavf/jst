@@ -445,9 +445,11 @@ h1 {
 }
 
 .terminal-cursor {
+  display: inline-block;
   width: 0.62em;
   height: 1.25em;
   flex: none;
+  vertical-align: -0.22em;
   background: var(--terminal-blue);
   animation: cursor-blink 1s steps(1, end) infinite;
 }
@@ -2442,6 +2444,7 @@ h3 {
 
   .translation {
     width: 100%;
+    min-height: 18rem;
     padding-right: 1rem;
     padding-left: 1rem;
   }
@@ -2468,8 +2471,27 @@ h3 {
   }
 
   .terminal-line {
+    align-items: flex-start;
     gap: 0.55rem;
+    overflow-x: visible;
     font-size: 0.8rem;
+    white-space: normal;
+  }
+
+  .terminal-line > code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .result-part {
+    display: inline;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  /* Connector paths become difficult to follow once command text wraps. */
+  .translation-map {
+    display: none;
   }
 
   .demo-form {

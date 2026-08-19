@@ -221,12 +221,17 @@ function wait(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function typeText(element, value, delay, run) {
-  element.textContent = "";
+function renderRequestParts(parts) {
+  renderParts(requestElement, parts, "request-part");
+  requestElement.append(cursorElement);
+}
+
+async function typeRequestText(value, delay, run) {
+  requestElement.replaceChildren(cursorElement);
 
   for (const character of value) {
     if (run !== animationRun) return false;
-    element.textContent += character;
+    requestElement.insertBefore(document.createTextNode(character), cursorElement);
     await wait(delay);
   }
 
@@ -333,7 +338,7 @@ async function explainRenderedExample(index) {
   stopSpinner();
   translationElement.classList.remove("is-loading");
   clearMap();
-  renderParts(requestElement, example.requestParts, "request-part");
+  renderRequestParts(example.requestParts);
   renderParts(resultElement, example.resultParts, "result-part");
   resultElement.querySelectorAll(".result-part").forEach((part) => {
     part.classList.add("is-visible");
@@ -1020,7 +1025,7 @@ async function showExample(index, animate = true) {
   clearMap();
 
   if (!animate || reduceMotion.matches) {
-    requestElement.textContent = request;
+    requestElement.replaceChildren(request, cursorElement);
     resultElement.textContent = result;
     resultLine.classList.add("is-visible");
     cursorElement.classList.add("is-hidden");
@@ -1028,15 +1033,15 @@ async function showExample(index, animate = true) {
     return;
   }
 
-  requestElement.textContent = "";
+  requestElement.replaceChildren(cursorElement);
   resultElement.textContent = "";
   resultLine.classList.remove("is-visible");
 
   await wait(220);
-  const requestFinished = await typeText(requestElement, request, 24, run);
+  const requestFinished = await typeRequestText(request, 24, run);
   if (!requestFinished || run !== animationRun) return;
 
-  renderParts(requestElement, example.requestParts, "request-part");
+  renderRequestParts(example.requestParts);
   cursorElement.classList.add("is-hidden");
   translationElement.classList.add("is-loading");
   startSpinner();
