@@ -40,7 +40,7 @@ test("loads one versioned browser toolbox bundle in both page and worker", () =>
 });
 
 test("cache-busts every layer of the sandbox runtime", () => {
-  assert.match(pageMarkup, /styles\.css\?v=30/);
+  assert.match(pageMarkup, /styles\.css\?v=32/);
   assert.match(pageMarkup, /script\.js\?v=47/);
   assert.match(pageScript, /demo-runtime\.js\?v=4/);
   assert.match(runtimeBundle, /demo-sandbox\.html\?v=15/);
