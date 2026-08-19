@@ -2468,8 +2468,27 @@ h3 {
   }
 
   .terminal-line {
+    align-items: flex-start;
     gap: 0.55rem;
+    overflow-x: visible;
     font-size: 0.8rem;
+    white-space: normal;
+  }
+
+  .terminal-line > code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .result-part {
+    display: inline;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  /* Connector paths become difficult to follow once command text wraps. */
+  .translation-map {
+    display: none;
   }
 
   .demo-form {
