@@ -445,9 +445,11 @@ h1 {
 }
 
 .terminal-cursor {
+  display: inline-block;
   width: 0.62em;
   height: 1.25em;
   flex: none;
+  vertical-align: -0.22em;
   background: var(--terminal-blue);
   animation: cursor-blink 1s steps(1, end) infinite;
 }
