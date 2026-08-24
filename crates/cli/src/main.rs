@@ -1921,12 +1921,12 @@ mod tests {
             ]
         );
 
-        let homebrew = apple_helper_candidates(Path::new("/opt/homebrew/Cellar/jst/0.4.0/bin/jst"));
+        let homebrew = apple_helper_candidates(Path::new("/opt/homebrew/Cellar/jst/0.5.0/bin/jst"));
         assert_eq!(
             homebrew,
             vec![
-                PathBuf::from("/opt/homebrew/Cellar/jst/0.4.0/bin/jst-apple-intelligence"),
-                PathBuf::from("/opt/homebrew/Cellar/jst/0.4.0/libexec/jst-apple-intelligence"),
+                PathBuf::from("/opt/homebrew/Cellar/jst/0.5.0/bin/jst-apple-intelligence"),
+                PathBuf::from("/opt/homebrew/Cellar/jst/0.5.0/libexec/jst-apple-intelligence"),
             ]
         );
     }
