@@ -89,6 +89,35 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FeedbackRequest {
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+pub fn is_valid_feedback_email(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 254
+        || value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return false;
+    }
+
+    let mut parts = value.split('@');
+    let (Some(local), Some(domain), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    !local.is_empty()
+        && local.len() <= 64
+        && domain.contains('.')
+        && domain
+            .split('.')
+            .all(|label| !label.is_empty() && !label.starts_with('-') && !label.ends_with('-'))
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerStatusResponse {
     pub status: String,
@@ -108,9 +137,19 @@ pub struct StatusUsage {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandEffects, CommandRevision, ServerStatusResponse, StatusUsage, TranslateRequest,
-        TranslateResponse,
+        is_valid_feedback_email, CommandEffects, CommandRevision, ServerStatusResponse,
+        StatusUsage, TranslateRequest, TranslateResponse,
     };
+
+    #[test]
+    fn validates_feedback_email_addresses() {
+        assert!(is_valid_feedback_email("person@example.com"));
+        assert!(is_valid_feedback_email("person+cli@sub.example.com"));
+        assert!(!is_valid_feedback_email(""));
+        assert!(!is_valid_feedback_email("person@example"));
+        assert!(!is_valid_feedback_email("person@@example.com"));
+        assert!(!is_valid_feedback_email("person\n@example.com"));
+    }
 
     fn response(effects: CommandEffects) -> TranslateResponse {
         TranslateResponse {

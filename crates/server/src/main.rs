@@ -14,13 +14,17 @@ mod openai_compatible;
 mod rate_limit;
 mod stats;
 
-use jst_shared::{ErrorResponse, ServerStatusResponse, StatusUsage, TranslateRequest};
+use jst_shared::{
+    is_valid_feedback_email, ErrorResponse, FeedbackRequest, ServerStatusResponse, StatusUsage,
+    TranslateRequest,
+};
 
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024;
 const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
 const MAX_DEMO_INPUT_BYTES: usize = 280;
+const MAX_FEEDBACK_MESSAGE_BYTES: usize = 2 * 1024;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
 const RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_DEMO_ALLOWED_ORIGIN: &str = "https://jst.sh";
@@ -113,8 +117,28 @@ struct AppState {
     translation_slots: Arc<Semaphore>,
     rate_limits: Arc<rate_limit::RateLimits>,
     demo_rate_limits: Arc<rate_limit::RateLimits>,
+    feedback_rate_limits: Arc<rate_limit::RateLimits>,
     demo_allowed_origins: Arc<Vec<String>>,
     stats: Option<Arc<stats::StatsCollector>>,
+    feedback: Option<FeedbackConfig>,
+}
+
+#[derive(Clone)]
+struct FeedbackConfig {
+    api_url: String,
+    api_key: String,
+    from_email: String,
+    to_email: String,
+}
+
+#[derive(Serialize)]
+struct FeedbackEmail<'a> {
+    from: &'a str,
+    to: &'a str,
+    subject: &'static str,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -198,6 +222,10 @@ async fn main() {
     let demo_requests_per_minute = env_u32("DEMO_REQUESTS_PER_MINUTE", 6);
     let demo_daily_requests_per_ip = env_u32("DEMO_DAILY_REQUESTS_PER_IP", 60);
     let demo_global_daily_request_limit = env_u32("DEMO_GLOBAL_DAILY_REQUEST_LIMIT", 1_000);
+    let feedback_monthly_request_limit = env_u32("FEEDBACK_MONTHLY_REQUEST_LIMIT", 10);
+    let feedback_requests_per_minute = env_u32("FEEDBACK_REQUESTS_PER_MINUTE", 2);
+    let feedback_daily_requests_per_ip = env_u32("FEEDBACK_DAILY_REQUESTS_PER_IP", 10);
+    let feedback_global_daily_request_limit = env_u32("FEEDBACK_GLOBAL_DAILY_REQUEST_LIMIT", 500);
     let demo_allowed_origins = std::env::var("DEMO_ALLOWED_ORIGINS")
         .unwrap_or_else(|_| DEFAULT_DEMO_ALLOWED_ORIGIN.to_string())
         .split(',')
@@ -236,10 +264,22 @@ async fn main() {
         },
         "demo",
     ));
+    let feedback_rate_limits = Arc::new(rate_limit::RateLimits::from_env_scoped(
+        &client,
+        rate_limit::Config {
+            monthly_limit: feedback_monthly_request_limit,
+            minute_limit: feedback_requests_per_minute,
+            daily_ip_limit: feedback_daily_requests_per_ip,
+            global_daily_limit: feedback_global_daily_request_limit,
+            max_client_entries: max_tracked_installations,
+        },
+        "feedback",
+    ));
     let stats = stats::StatsCollector::from_env(&client);
     if let Some(collector) = stats.clone() {
         tokio::spawn(collector.flush_loop());
     }
+    let feedback_config = feedback_config_from_env();
     let state = AppState {
         client,
         llm_api_url,
@@ -250,8 +290,10 @@ async fn main() {
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
         rate_limits,
         demo_rate_limits,
+        feedback_rate_limits,
         demo_allowed_origins: Arc::new(demo_allowed_origins),
         stats: stats.clone(),
+        feedback: feedback_config,
     };
 
     let app = Router::new()
@@ -259,6 +301,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/status", get(server_status))
         .route("/translate", post(translate))
+        .route("/feedback", post(feedback))
         .route("/demo", post(demo).options(demo_options))
         .route("/stats", get(usage_stats))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -289,6 +332,25 @@ fn env_u32(name: &str, default: u32) -> u32 {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(default)
+}
+
+fn feedback_config_from_env() -> Option<FeedbackConfig> {
+    let api_key = std::env::var("RESEND_API_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    let to_email = std::env::var("FEEDBACK_TO_EMAIL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    let from_email = std::env::var("FEEDBACK_FROM_EMAIL")
+        .unwrap_or_else(|_| "JST Feedback <feedback@jst.sh>".to_string());
+    let api_url = std::env::var("RESEND_API_URL")
+        .unwrap_or_else(|_| "https://api.resend.com/emails".to_string());
+    Some(FeedbackConfig {
+        api_url,
+        api_key,
+        from_email,
+        to_email,
+    })
 }
 
 async fn server_status(State(state): State<AppState>) -> Response {
@@ -356,6 +418,152 @@ async fn usage_stats(State(state): State<AppState>) -> Response {
         .headers_mut()
         .insert("access-control-allow-origin", HeaderValue::from_static("*"));
     response
+}
+
+async fn feedback(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<FeedbackRequest>,
+) -> Response {
+    if let Err(message) = validate_feedback_request(&req) {
+        return bad_request(message);
+    }
+    let Some(config) = &state.feedback else {
+        return bad_request_with_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "feedback is temporarily unavailable",
+        );
+    };
+    let installation_fingerprint = match require_installation_fingerprint(&headers) {
+        Ok(fingerprint) => fingerprint,
+        Err(message) => return bad_request(message),
+    };
+    let address_fingerprint = match request_address_fingerprint(&headers) {
+        Ok(fingerprint) => fingerprint,
+        Err(message) => return bad_request(message),
+    };
+    let client_fingerprint = address_fingerprint
+        .as_deref()
+        .unwrap_or(&installation_fingerprint);
+    let decisions = match tokio::time::timeout(
+        RATE_LIMIT_TIMEOUT,
+        state
+            .feedback_rate_limits
+            .check(Some(&installation_fingerprint), client_fingerprint),
+    )
+    .await
+    {
+        Ok(Ok(decisions)) => decisions,
+        Ok(Err(error)) => {
+            error!("Feedback rate-limit store error: {error}");
+            return feedback_busy_response();
+        }
+        Err(_) => {
+            error!("Feedback rate-limit store timed out");
+            return feedback_busy_response();
+        }
+    };
+    let usage = match feedback_usage(decisions) {
+        Ok(usage) => usage,
+        Err(response) => return *response,
+    };
+    let sender = req.email.as_deref().unwrap_or("Anonymous");
+    let email = FeedbackEmail {
+        from: &config.from_email,
+        to: &config.to_email,
+        subject: "New JST feedback",
+        text: format!("From: {sender}\n\n{}", req.message.trim()),
+        reply_to: req.email.as_deref(),
+    };
+    let result = state
+        .client
+        .post(&config.api_url)
+        .bearer_auth(&config.api_key)
+        .json(&email)
+        .send()
+        .await;
+    match result {
+        Ok(response) if response.status().is_success() => {
+            with_usage_headers(StatusCode::NO_CONTENT.into_response(), usage)
+        }
+        Ok(response) => {
+            error!(
+                "Feedback email provider returned HTTP {}",
+                response.status()
+            );
+            bad_request_with_status(
+                StatusCode::BAD_GATEWAY,
+                "feedback could not be delivered; try again later",
+            )
+        }
+        Err(error) => {
+            error!("Feedback email provider error: {error}");
+            bad_request_with_status(
+                StatusCode::BAD_GATEWAY,
+                "feedback could not be delivered; try again later",
+            )
+        }
+    }
+}
+
+fn feedback_usage(decisions: rate_limit::Decisions) -> Result<UsageHeaders, Box<Response>> {
+    let mut usage = UsageHeaders::default();
+    macro_rules! apply_limit {
+        ($decision:expr, $field:ident, $retry_after:expr) => {
+            match check_decision($decision) {
+                Ok(value) => usage.$field = value,
+                Err(LimitFailure::Exhausted(limit)) => {
+                    usage.$field = Some((limit, 0));
+                    return Err(Box::new(limit_response(
+                        "feedback rate limit reached; try again later",
+                        $retry_after,
+                        usage,
+                    )));
+                }
+                Err(LimitFailure::Capacity) => return Err(Box::new(feedback_busy_response())),
+            }
+        };
+    }
+
+    apply_limit!(decisions.minute, minute, Some("60"));
+    apply_limit!(decisions.daily_ip, daily_ip, None);
+    apply_limit!(decisions.monthly, monthly, None);
+    apply_limit!(decisions.global_daily, global_daily, None);
+    Ok(usage)
+}
+
+fn feedback_busy_response() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(ErrorResponse {
+            error: "feedback is busy; try again shortly".to_string(),
+        }),
+    )
+        .into_response()
+}
+
+fn validate_feedback_request(request: &FeedbackRequest) -> Result<(), &'static str> {
+    let message = request.message.trim();
+    if message.is_empty() {
+        return Err("feedback message cannot be empty");
+    }
+    if message.len() > MAX_FEEDBACK_MESSAGE_BYTES {
+        return Err("feedback message is too long");
+    }
+    if message
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("feedback message contains unsupported characters");
+    }
+    if request
+        .email
+        .as_deref()
+        .is_some_and(|email| !is_valid_feedback_email(email))
+    {
+        return Err("feedback email is invalid");
+    }
+    Ok(())
 }
 
 async fn demo_options(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -765,12 +973,8 @@ fn request_limit_fingerprints(
 }
 
 fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
-    if let Some(value) = headers.get("x-jst-installation-id") {
-        let value = value.to_str().map_err(|_| "invalid JST installation ID")?;
-        if is_installation_id(value) {
-            return Ok(format!("installation:{value}"));
-        }
-        return Err("invalid JST installation ID");
+    if headers.contains_key("x-jst-installation-id") {
+        return require_installation_fingerprint(headers);
     }
 
     if let Some(fingerprint) = request_address_fingerprint(headers)? {
@@ -778,6 +982,19 @@ fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
     }
 
     Err("missing JST installation ID")
+}
+
+fn require_installation_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
+    let value = headers
+        .get("x-jst-installation-id")
+        .ok_or("missing JST installation ID")?
+        .to_str()
+        .map_err(|_| "invalid JST installation ID")?;
+    if is_installation_id(value) {
+        Ok(format!("installation:{value}"))
+    } else {
+        Err("invalid JST installation ID")
+    }
 }
 
 fn request_browser_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
@@ -1137,10 +1354,12 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        allowed_demo_origin, demo_inner, is_allowed_demo_command, request_browser_fingerprint,
-        request_fingerprint, request_limit_fingerprints, status_usage, translate,
-        translate_with_limits, validate_demo_request, validate_request, with_usage_headers,
-        AppState, DemoRequest, UsageHeaders, DEMO_UNAVAILABLE_MESSAGE,
+        allowed_demo_origin, demo_inner, feedback, is_allowed_demo_command,
+        request_browser_fingerprint, request_fingerprint, request_limit_fingerprints,
+        require_installation_fingerprint, status_usage, translate, translate_with_limits,
+        validate_demo_request, validate_feedback_request, validate_request, with_usage_headers,
+        AppState, DemoRequest, FeedbackConfig, FeedbackEmail, UsageHeaders,
+        DEMO_UNAVAILABLE_MESSAGE,
     };
     use axum::{
         body::to_bytes,
@@ -1149,7 +1368,7 @@ mod tests {
         response::IntoResponse,
         Json,
     };
-    use jst_shared::{ErrorResponse, TranslateRequest};
+    use jst_shared::{ErrorResponse, FeedbackRequest, TranslateRequest};
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
@@ -1192,14 +1411,136 @@ mod tests {
             translation_slots: Arc::new(Semaphore::new(2)),
             rate_limits: disabled_limits(),
             demo_rate_limits: disabled_limits(),
+            feedback_rate_limits: disabled_limits(),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
+            feedback: None,
         }
     }
 
     #[test]
     fn accepts_normal_requests() {
         assert!(validate_request(&request("find large files")).is_ok());
+    }
+
+    #[test]
+    fn validates_feedback_messages_and_optional_email() {
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "Great tool".to_string(),
+            email: None,
+        })
+        .is_ok());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "Great tool".to_string(),
+            email: Some("person@example.com".to_string()),
+        })
+        .is_ok());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "   ".to_string(),
+            email: None,
+        })
+        .is_err());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "x".repeat(super::MAX_FEEDBACK_MESSAGE_BYTES + 1),
+            email: None,
+        })
+        .is_err());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "hello".to_string(),
+            email: Some("not-an-email".to_string()),
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn anonymous_feedback_email_omits_reply_to() {
+        let email = FeedbackEmail {
+            from: "JST <feedback@example.com>",
+            to: "maintainer@example.com",
+            subject: "New JST feedback",
+            text: "From: Anonymous\n\nHello".to_string(),
+            reply_to: None,
+        };
+        let value = serde_json::to_value(email).unwrap();
+
+        assert_eq!(value["text"], "From: Anonymous\n\nHello");
+        assert!(value.get("reply_to").is_none());
+    }
+
+    #[tokio::test]
+    async fn feedback_forwards_email_with_reply_to() {
+        let received = Arc::new(Mutex::new(None));
+        let mock = axum::Router::new().route(
+            "/",
+            axum::routing::post({
+                let received = received.clone();
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let received = received.clone();
+                    async move {
+                        *received.lock().unwrap() = Some((headers, body));
+                        StatusCode::OK
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+
+        let mut state = provider_test_state(
+            reqwest::Client::new(),
+            "http://unused.invalid".to_string(),
+            None,
+        );
+        state.feedback = Some(FeedbackConfig {
+            api_url: format!("http://{address}"),
+            api_key: "resend-secret".to_string(),
+            from_email: "JST <feedback@example.com>".to_string(),
+            to_email: "maintainer@example.com".to_string(),
+        });
+        state.feedback_rate_limits = Arc::new(super::rate_limit::RateLimits::for_test_local(
+            super::rate_limit::Config {
+                monthly_limit: 1,
+                minute_limit: 0,
+                daily_ip_limit: 0,
+                global_daily_limit: 0,
+                max_client_entries: 1,
+            },
+        ));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-jst-installation-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        let response = feedback(
+            State(state.clone()),
+            headers.clone(),
+            Json(FeedbackRequest {
+                message: "It works nicely".to_string(),
+                email: Some("person@example.com".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let (provider_headers, body) = received.lock().unwrap().take().unwrap();
+        assert_eq!(provider_headers["authorization"], "Bearer resend-secret");
+        assert_eq!(body["from"], "JST <feedback@example.com>");
+        assert_eq!(body["to"], "maintainer@example.com");
+        assert_eq!(body["reply_to"], "person@example.com");
+        assert_eq!(body["text"], "From: person@example.com\n\nIt works nicely");
+
+        let limited = feedback(
+            State(state),
+            headers,
+            Json(FeedbackRequest {
+                message: "A second message".to_string(),
+                email: None,
+            }),
+        )
+        .await;
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(received.lock().unwrap().is_none());
     }
 
     #[test]
@@ -1355,6 +1696,15 @@ mod tests {
             HeaderValue::from_static("not-an-id"),
         );
         assert!(request_fingerprint(&headers).is_err());
+    }
+
+    #[test]
+    fn feedback_identity_does_not_allow_ip_fallback() {
+        let mut headers = HeaderMap::new();
+        headers.insert("fly-client-ip", HeaderValue::from_static("192.0.2.1"));
+
+        assert!(request_fingerprint(&headers).is_ok());
+        assert!(require_installation_fingerprint(&headers).is_err());
     }
 
     #[test]
@@ -1596,8 +1946,18 @@ mod tests {
                     max_client_entries: 1,
                 },
             )),
+            feedback_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            )),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
+            feedback: None,
         };
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1683,8 +2043,18 @@ mod tests {
                     max_client_entries: 1,
                 },
             )),
+            feedback_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            )),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
+            feedback: None,
         };
 
         let mut headers = HeaderMap::new();

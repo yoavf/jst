@@ -174,6 +174,11 @@ Calls all time: 4567
 The usage totals are anonymous aggregates and display as unavailable when the
 server's stats store is disabled or temporarily unreachable.
 
+### Feedback
+
+Run `jst --feedback` and follow the prompts. Press Enter at the email prompt to
+send feedback anonymously.
+
 ## Server
 
 By default, the CLI sends translation requests to the hosted JST server. The
@@ -266,6 +271,9 @@ JST_API_URL=http://127.0.0.1:8080/translate jst find large files
 
 `jst --status` derives the sibling `/status` endpoint from `JST_API_URL`. Set
 `JST_STATUS_URL` when a custom deployment exposes status at a different URL.
+`jst --feedback` similarly uses `/feedback`. To enable forwarding, set
+`RESEND_API_KEY`, `FEEDBACK_TO_EMAIL`, and a verified `FEEDBACK_FROM_EMAIL`
+sender.
 
 The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.
