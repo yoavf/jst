@@ -281,6 +281,10 @@ and `FEEDBACK_TO_EMAIL` to enable it. `FEEDBACK_FROM_EMAIL` defaults to
 Resend account; self-hosters will normally override it. `RESEND_API_URL` may be
 set for testing or a compatible email gateway. Optional user email addresses
 are used as the message's reply-to address; anonymous feedback has no reply-to.
+`FEEDBACK_MONTHLY_REQUEST_LIMIT`, `FEEDBACK_REQUESTS_PER_MINUTE`,
+`FEEDBACK_DAILY_REQUESTS_PER_IP`, and `FEEDBACK_GLOBAL_DAILY_REQUEST_LIMIT`
+configure an independent feedback quota namespace and default to 10, 2, 10,
+and 500 respectively. Each accepts `0` to disable that limit.
 
 The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.

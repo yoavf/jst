@@ -117,6 +117,7 @@ struct AppState {
     translation_slots: Arc<Semaphore>,
     rate_limits: Arc<rate_limit::RateLimits>,
     demo_rate_limits: Arc<rate_limit::RateLimits>,
+    feedback_rate_limits: Arc<rate_limit::RateLimits>,
     demo_allowed_origins: Arc<Vec<String>>,
     stats: Option<Arc<stats::StatsCollector>>,
     feedback: Option<FeedbackConfig>,
@@ -221,6 +222,10 @@ async fn main() {
     let demo_requests_per_minute = env_u32("DEMO_REQUESTS_PER_MINUTE", 6);
     let demo_daily_requests_per_ip = env_u32("DEMO_DAILY_REQUESTS_PER_IP", 60);
     let demo_global_daily_request_limit = env_u32("DEMO_GLOBAL_DAILY_REQUEST_LIMIT", 1_000);
+    let feedback_monthly_request_limit = env_u32("FEEDBACK_MONTHLY_REQUEST_LIMIT", 10);
+    let feedback_requests_per_minute = env_u32("FEEDBACK_REQUESTS_PER_MINUTE", 2);
+    let feedback_daily_requests_per_ip = env_u32("FEEDBACK_DAILY_REQUESTS_PER_IP", 10);
+    let feedback_global_daily_request_limit = env_u32("FEEDBACK_GLOBAL_DAILY_REQUEST_LIMIT", 500);
     let demo_allowed_origins = std::env::var("DEMO_ALLOWED_ORIGINS")
         .unwrap_or_else(|_| DEFAULT_DEMO_ALLOWED_ORIGIN.to_string())
         .split(',')
@@ -259,6 +264,17 @@ async fn main() {
         },
         "demo",
     ));
+    let feedback_rate_limits = Arc::new(rate_limit::RateLimits::from_env_scoped(
+        &client,
+        rate_limit::Config {
+            monthly_limit: feedback_monthly_request_limit,
+            minute_limit: feedback_requests_per_minute,
+            daily_ip_limit: feedback_daily_requests_per_ip,
+            global_daily_limit: feedback_global_daily_request_limit,
+            max_client_entries: max_tracked_installations,
+        },
+        "feedback",
+    ));
     let stats = stats::StatsCollector::from_env(&client);
     if let Some(collector) = stats.clone() {
         tokio::spawn(collector.flush_loop());
@@ -274,6 +290,7 @@ async fn main() {
         translation_slots: Arc::new(Semaphore::new(max_concurrent_translations)),
         rate_limits,
         demo_rate_limits,
+        feedback_rate_limits,
         demo_allowed_origins: Arc::new(demo_allowed_origins),
         stats: stats.clone(),
         feedback: feedback_config,
@@ -411,16 +428,45 @@ async fn feedback(
     if let Err(message) = validate_feedback_request(&req) {
         return bad_request(message);
     }
-    if request_fingerprint(&headers).is_err() {
-        return bad_request("feedback requests require a valid JST installation ID");
-    }
     let Some(config) = &state.feedback else {
         return bad_request_with_status(
             StatusCode::SERVICE_UNAVAILABLE,
             "feedback is temporarily unavailable",
         );
     };
-
+    let installation_fingerprint = match require_installation_fingerprint(&headers) {
+        Ok(fingerprint) => fingerprint,
+        Err(message) => return bad_request(message),
+    };
+    let address_fingerprint = match request_address_fingerprint(&headers) {
+        Ok(fingerprint) => fingerprint,
+        Err(message) => return bad_request(message),
+    };
+    let client_fingerprint = address_fingerprint
+        .as_deref()
+        .unwrap_or(&installation_fingerprint);
+    let decisions = match tokio::time::timeout(
+        RATE_LIMIT_TIMEOUT,
+        state
+            .feedback_rate_limits
+            .check(Some(&installation_fingerprint), client_fingerprint),
+    )
+    .await
+    {
+        Ok(Ok(decisions)) => decisions,
+        Ok(Err(error)) => {
+            error!("Feedback rate-limit store error: {error}");
+            return feedback_busy_response();
+        }
+        Err(_) => {
+            error!("Feedback rate-limit store timed out");
+            return feedback_busy_response();
+        }
+    };
+    let usage = match feedback_usage(decisions) {
+        Ok(usage) => usage,
+        Err(response) => return *response,
+    };
     let sender = req.email.as_deref().unwrap_or("Anonymous");
     let email = FeedbackEmail {
         from: &config.from_email,
@@ -437,7 +483,9 @@ async fn feedback(
         .send()
         .await;
     match result {
-        Ok(response) if response.status().is_success() => StatusCode::NO_CONTENT.into_response(),
+        Ok(response) if response.status().is_success() => {
+            with_usage_headers(StatusCode::NO_CONTENT.into_response(), usage)
+        }
         Ok(response) => {
             error!(
                 "Feedback email provider returned HTTP {}",
@@ -456,6 +504,42 @@ async fn feedback(
             )
         }
     }
+}
+
+fn feedback_usage(decisions: rate_limit::Decisions) -> Result<UsageHeaders, Box<Response>> {
+    let mut usage = UsageHeaders::default();
+    macro_rules! apply_limit {
+        ($decision:expr, $field:ident, $retry_after:expr) => {
+            match check_decision($decision) {
+                Ok(value) => usage.$field = value,
+                Err(LimitFailure::Exhausted(limit)) => {
+                    usage.$field = Some((limit, 0));
+                    return Err(Box::new(limit_response(
+                        "feedback rate limit reached; try again later",
+                        $retry_after,
+                        usage,
+                    )));
+                }
+                Err(LimitFailure::Capacity) => return Err(Box::new(feedback_busy_response())),
+            }
+        };
+    }
+
+    apply_limit!(decisions.minute, minute, Some("60"));
+    apply_limit!(decisions.daily_ip, daily_ip, None);
+    apply_limit!(decisions.monthly, monthly, None);
+    apply_limit!(decisions.global_daily, global_daily, None);
+    Ok(usage)
+}
+
+fn feedback_busy_response() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(ErrorResponse {
+            error: "feedback is busy; try again shortly".to_string(),
+        }),
+    )
+        .into_response()
 }
 
 fn validate_feedback_request(request: &FeedbackRequest) -> Result<(), &'static str> {
@@ -889,12 +973,8 @@ fn request_limit_fingerprints(
 }
 
 fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
-    if let Some(value) = headers.get("x-jst-installation-id") {
-        let value = value.to_str().map_err(|_| "invalid JST installation ID")?;
-        if is_installation_id(value) {
-            return Ok(format!("installation:{value}"));
-        }
-        return Err("invalid JST installation ID");
+    if headers.contains_key("x-jst-installation-id") {
+        return require_installation_fingerprint(headers);
     }
 
     if let Some(fingerprint) = request_address_fingerprint(headers)? {
@@ -902,6 +982,19 @@ fn request_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
     }
 
     Err("missing JST installation ID")
+}
+
+fn require_installation_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
+    let value = headers
+        .get("x-jst-installation-id")
+        .ok_or("missing JST installation ID")?
+        .to_str()
+        .map_err(|_| "invalid JST installation ID")?;
+    if is_installation_id(value) {
+        Ok(format!("installation:{value}"))
+    } else {
+        Err("invalid JST installation ID")
+    }
 }
 
 fn request_browser_fingerprint(headers: &HeaderMap) -> Result<String, &'static str> {
@@ -1262,10 +1355,11 @@ async fn shutdown_signal() {
 mod tests {
     use super::{
         allowed_demo_origin, demo_inner, feedback, is_allowed_demo_command,
-        request_browser_fingerprint, request_fingerprint, request_limit_fingerprints, status_usage,
-        translate, translate_with_limits, validate_demo_request, validate_feedback_request,
-        validate_request, with_usage_headers, AppState, DemoRequest, FeedbackConfig, FeedbackEmail,
-        UsageHeaders, DEMO_UNAVAILABLE_MESSAGE,
+        request_browser_fingerprint, request_fingerprint, request_limit_fingerprints,
+        require_installation_fingerprint, status_usage, translate, translate_with_limits,
+        validate_demo_request, validate_feedback_request, validate_request, with_usage_headers,
+        AppState, DemoRequest, FeedbackConfig, FeedbackEmail, UsageHeaders,
+        DEMO_UNAVAILABLE_MESSAGE,
     };
     use axum::{
         body::to_bytes,
@@ -1317,6 +1411,7 @@ mod tests {
             translation_slots: Arc::new(Semaphore::new(2)),
             rate_limits: disabled_limits(),
             demo_rate_limits: disabled_limits(),
+            feedback_rate_limits: disabled_limits(),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
             feedback: None,
@@ -1403,14 +1498,23 @@ mod tests {
             from_email: "JST <feedback@example.com>".to_string(),
             to_email: "maintainer@example.com".to_string(),
         });
+        state.feedback_rate_limits = Arc::new(super::rate_limit::RateLimits::for_test_local(
+            super::rate_limit::Config {
+                monthly_limit: 1,
+                minute_limit: 0,
+                daily_ip_limit: 0,
+                global_daily_limit: 0,
+                max_client_entries: 1,
+            },
+        ));
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-jst-installation-id",
             HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
         );
         let response = feedback(
-            State(state),
-            headers,
+            State(state.clone()),
+            headers.clone(),
             Json(FeedbackRequest {
                 message: "It works nicely".to_string(),
                 email: Some("person@example.com".to_string()),
@@ -1419,12 +1523,24 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        let (headers, body) = received.lock().unwrap().take().unwrap();
-        assert_eq!(headers["authorization"], "Bearer resend-secret");
+        let (provider_headers, body) = received.lock().unwrap().take().unwrap();
+        assert_eq!(provider_headers["authorization"], "Bearer resend-secret");
         assert_eq!(body["from"], "JST <feedback@example.com>");
         assert_eq!(body["to"], "maintainer@example.com");
         assert_eq!(body["reply_to"], "person@example.com");
         assert_eq!(body["text"], "From: person@example.com\n\nIt works nicely");
+
+        let limited = feedback(
+            State(state),
+            headers,
+            Json(FeedbackRequest {
+                message: "A second message".to_string(),
+                email: None,
+            }),
+        )
+        .await;
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(received.lock().unwrap().is_none());
     }
 
     #[test]
@@ -1580,6 +1696,15 @@ mod tests {
             HeaderValue::from_static("not-an-id"),
         );
         assert!(request_fingerprint(&headers).is_err());
+    }
+
+    #[test]
+    fn feedback_identity_does_not_allow_ip_fallback() {
+        let mut headers = HeaderMap::new();
+        headers.insert("fly-client-ip", HeaderValue::from_static("192.0.2.1"));
+
+        assert!(request_fingerprint(&headers).is_ok());
+        assert!(require_installation_fingerprint(&headers).is_err());
     }
 
     #[test]
@@ -1821,6 +1946,15 @@ mod tests {
                     max_client_entries: 1,
                 },
             )),
+            feedback_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            )),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
             feedback: None,
@@ -1901,6 +2035,15 @@ mod tests {
                 },
             )),
             demo_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
+                super::rate_limit::Config {
+                    monthly_limit: 0,
+                    minute_limit: 0,
+                    daily_ip_limit: 0,
+                    global_daily_limit: 0,
+                    max_client_entries: 1,
+                },
+            )),
+            feedback_rate_limits: Arc::new(super::rate_limit::RateLimits::for_test_local(
                 super::rate_limit::Config {
                     monthly_limit: 0,
                     minute_limit: 0,
