@@ -14,13 +14,17 @@ mod openai_compatible;
 mod rate_limit;
 mod stats;
 
-use jst_shared::{ErrorResponse, ServerStatusResponse, StatusUsage, TranslateRequest};
+use jst_shared::{
+    is_valid_feedback_email, ErrorResponse, FeedbackRequest, ServerStatusResponse, StatusUsage,
+    TranslateRequest,
+};
 
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024;
 const MAX_INPUT_BYTES: usize = 512;
 const MAX_REVISION_COMMAND_BYTES: usize = 2 * 1024;
 const MAX_REVISION_INSTRUCTION_BYTES: usize = 512;
 const MAX_DEMO_INPUT_BYTES: usize = 280;
+const MAX_FEEDBACK_MESSAGE_BYTES: usize = 2 * 1024;
 const STATUS_STATS_TIMEOUT: Duration = Duration::from_secs(2);
 const RATE_LIMIT_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_DEMO_ALLOWED_ORIGIN: &str = "https://jst.sh";
@@ -115,6 +119,25 @@ struct AppState {
     demo_rate_limits: Arc<rate_limit::RateLimits>,
     demo_allowed_origins: Arc<Vec<String>>,
     stats: Option<Arc<stats::StatsCollector>>,
+    feedback: Option<FeedbackConfig>,
+}
+
+#[derive(Clone)]
+struct FeedbackConfig {
+    api_url: String,
+    api_key: String,
+    from_email: String,
+    to_email: String,
+}
+
+#[derive(Serialize)]
+struct FeedbackEmail<'a> {
+    from: &'a str,
+    to: &'a str,
+    subject: &'static str,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -240,6 +263,7 @@ async fn main() {
     if let Some(collector) = stats.clone() {
         tokio::spawn(collector.flush_loop());
     }
+    let feedback_config = feedback_config_from_env();
     let state = AppState {
         client,
         llm_api_url,
@@ -252,6 +276,7 @@ async fn main() {
         demo_rate_limits,
         demo_allowed_origins: Arc::new(demo_allowed_origins),
         stats: stats.clone(),
+        feedback: feedback_config,
     };
 
     let app = Router::new()
@@ -259,6 +284,7 @@ async fn main() {
         .route("/health", get(health))
         .route("/status", get(server_status))
         .route("/translate", post(translate))
+        .route("/feedback", post(feedback))
         .route("/demo", post(demo).options(demo_options))
         .route("/stats", get(usage_stats))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -289,6 +315,25 @@ fn env_u32(name: &str, default: u32) -> u32 {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(default)
+}
+
+fn feedback_config_from_env() -> Option<FeedbackConfig> {
+    let api_key = std::env::var("RESEND_API_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    let to_email = std::env::var("FEEDBACK_TO_EMAIL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    let from_email = std::env::var("FEEDBACK_FROM_EMAIL")
+        .unwrap_or_else(|_| "JST Feedback <feedback@jst.sh>".to_string());
+    let api_url = std::env::var("RESEND_API_URL")
+        .unwrap_or_else(|_| "https://api.resend.com/emails".to_string());
+    Some(FeedbackConfig {
+        api_url,
+        api_key,
+        from_email,
+        to_email,
+    })
 }
 
 async fn server_status(State(state): State<AppState>) -> Response {
@@ -356,6 +401,85 @@ async fn usage_stats(State(state): State<AppState>) -> Response {
         .headers_mut()
         .insert("access-control-allow-origin", HeaderValue::from_static("*"));
     response
+}
+
+async fn feedback(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<FeedbackRequest>,
+) -> Response {
+    if let Err(message) = validate_feedback_request(&req) {
+        return bad_request(message);
+    }
+    if request_fingerprint(&headers).is_err() {
+        return bad_request("feedback requests require a valid JST installation ID");
+    }
+    let Some(config) = &state.feedback else {
+        return bad_request_with_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "feedback is temporarily unavailable",
+        );
+    };
+
+    let sender = req.email.as_deref().unwrap_or("Anonymous");
+    let email = FeedbackEmail {
+        from: &config.from_email,
+        to: &config.to_email,
+        subject: "New JST feedback",
+        text: format!("From: {sender}\n\n{}", req.message.trim()),
+        reply_to: req.email.as_deref(),
+    };
+    let result = state
+        .client
+        .post(&config.api_url)
+        .bearer_auth(&config.api_key)
+        .json(&email)
+        .send()
+        .await;
+    match result {
+        Ok(response) if response.status().is_success() => StatusCode::NO_CONTENT.into_response(),
+        Ok(response) => {
+            error!(
+                "Feedback email provider returned HTTP {}",
+                response.status()
+            );
+            bad_request_with_status(
+                StatusCode::BAD_GATEWAY,
+                "feedback could not be delivered; try again later",
+            )
+        }
+        Err(error) => {
+            error!("Feedback email provider error: {error}");
+            bad_request_with_status(
+                StatusCode::BAD_GATEWAY,
+                "feedback could not be delivered; try again later",
+            )
+        }
+    }
+}
+
+fn validate_feedback_request(request: &FeedbackRequest) -> Result<(), &'static str> {
+    let message = request.message.trim();
+    if message.is_empty() {
+        return Err("feedback message cannot be empty");
+    }
+    if message.len() > MAX_FEEDBACK_MESSAGE_BYTES {
+        return Err("feedback message is too long");
+    }
+    if message
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("feedback message contains unsupported characters");
+    }
+    if request
+        .email
+        .as_deref()
+        .is_some_and(|email| !is_valid_feedback_email(email))
+    {
+        return Err("feedback email is invalid");
+    }
+    Ok(())
 }
 
 async fn demo_options(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -1137,10 +1261,11 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::{
-        allowed_demo_origin, demo_inner, is_allowed_demo_command, request_browser_fingerprint,
-        request_fingerprint, request_limit_fingerprints, status_usage, translate,
-        translate_with_limits, validate_demo_request, validate_request, with_usage_headers,
-        AppState, DemoRequest, UsageHeaders, DEMO_UNAVAILABLE_MESSAGE,
+        allowed_demo_origin, demo_inner, feedback, is_allowed_demo_command,
+        request_browser_fingerprint, request_fingerprint, request_limit_fingerprints, status_usage,
+        translate, translate_with_limits, validate_demo_request, validate_feedback_request,
+        validate_request, with_usage_headers, AppState, DemoRequest, FeedbackConfig, FeedbackEmail,
+        UsageHeaders, DEMO_UNAVAILABLE_MESSAGE,
     };
     use axum::{
         body::to_bytes,
@@ -1149,7 +1274,7 @@ mod tests {
         response::IntoResponse,
         Json,
     };
-    use jst_shared::{ErrorResponse, TranslateRequest};
+    use jst_shared::{ErrorResponse, FeedbackRequest, TranslateRequest};
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
@@ -1194,12 +1319,112 @@ mod tests {
             demo_rate_limits: disabled_limits(),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
+            feedback: None,
         }
     }
 
     #[test]
     fn accepts_normal_requests() {
         assert!(validate_request(&request("find large files")).is_ok());
+    }
+
+    #[test]
+    fn validates_feedback_messages_and_optional_email() {
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "Great tool".to_string(),
+            email: None,
+        })
+        .is_ok());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "Great tool".to_string(),
+            email: Some("person@example.com".to_string()),
+        })
+        .is_ok());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "   ".to_string(),
+            email: None,
+        })
+        .is_err());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "x".repeat(super::MAX_FEEDBACK_MESSAGE_BYTES + 1),
+            email: None,
+        })
+        .is_err());
+        assert!(validate_feedback_request(&FeedbackRequest {
+            message: "hello".to_string(),
+            email: Some("not-an-email".to_string()),
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn anonymous_feedback_email_omits_reply_to() {
+        let email = FeedbackEmail {
+            from: "JST <feedback@example.com>",
+            to: "maintainer@example.com",
+            subject: "New JST feedback",
+            text: "From: Anonymous\n\nHello".to_string(),
+            reply_to: None,
+        };
+        let value = serde_json::to_value(email).unwrap();
+
+        assert_eq!(value["text"], "From: Anonymous\n\nHello");
+        assert!(value.get("reply_to").is_none());
+    }
+
+    #[tokio::test]
+    async fn feedback_forwards_email_with_reply_to() {
+        let received = Arc::new(Mutex::new(None));
+        let mock = axum::Router::new().route(
+            "/",
+            axum::routing::post({
+                let received = received.clone();
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let received = received.clone();
+                    async move {
+                        *received.lock().unwrap() = Some((headers, body));
+                        StatusCode::OK
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+
+        let mut state = provider_test_state(
+            reqwest::Client::new(),
+            "http://unused.invalid".to_string(),
+            None,
+        );
+        state.feedback = Some(FeedbackConfig {
+            api_url: format!("http://{address}"),
+            api_key: "resend-secret".to_string(),
+            from_email: "JST <feedback@example.com>".to_string(),
+            to_email: "maintainer@example.com".to_string(),
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-jst-installation-id",
+            HeaderValue::from_static("123e4567-e89b-12d3-a456-426614174000"),
+        );
+        let response = feedback(
+            State(state),
+            headers,
+            Json(FeedbackRequest {
+                message: "It works nicely".to_string(),
+                email: Some("person@example.com".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let (headers, body) = received.lock().unwrap().take().unwrap();
+        assert_eq!(headers["authorization"], "Bearer resend-secret");
+        assert_eq!(body["from"], "JST <feedback@example.com>");
+        assert_eq!(body["to"], "maintainer@example.com");
+        assert_eq!(body["reply_to"], "person@example.com");
+        assert_eq!(body["text"], "From: person@example.com\n\nIt works nicely");
     }
 
     #[test]
@@ -1598,6 +1823,7 @@ mod tests {
             )),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
+            feedback: None,
         };
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1685,6 +1911,7 @@ mod tests {
             )),
             demo_allowed_origins: Arc::new(vec!["https://jst.sh".to_string()]),
             stats: None,
+            feedback: None,
         };
 
         let mut headers = HeaderMap::new();

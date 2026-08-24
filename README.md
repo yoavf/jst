@@ -174,6 +174,13 @@ Calls all time: 4567
 The usage totals are anonymous aggregates and display as unavailable when the
 server's stats store is disabled or temporarily unreachable.
 
+### Feedback
+
+Run `jst --feedback` to send feedback to the maintainer. JST asks for the
+message first, then for an optional reply address; press Enter at the email
+prompt to stay anonymous. The message is sent through the configured JST
+server and is never passed to the command-generation model.
+
 ## Server
 
 By default, the CLI sends translation requests to the hosted JST server. The
@@ -266,6 +273,14 @@ JST_API_URL=http://127.0.0.1:8080/translate jst find large files
 
 `jst --status` derives the sibling `/status` endpoint from `JST_API_URL`. Set
 `JST_STATUS_URL` when a custom deployment exposes status at a different URL.
+Likewise, `jst --feedback` derives `/feedback`; `JST_FEEDBACK_URL` overrides it.
+
+The feedback endpoint forwards messages through Resend. Set `RESEND_API_KEY`
+and `FEEDBACK_TO_EMAIL` to enable it. `FEEDBACK_FROM_EMAIL` defaults to
+`JST Feedback <feedback@jst.sh>` and must use a sender domain verified in your
+Resend account; self-hosters will normally override it. `RESEND_API_URL` may be
+set for testing or a compatible email gateway. Optional user email addresses
+are used as the message's reply-to address; anonymous feedback has no reply-to.
 
 The server listens on `PORT` (default `8080`).
 `MAX_CONCURRENT_TRANSLATIONS` optionally limits simultaneous provider calls.

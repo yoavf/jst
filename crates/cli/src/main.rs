@@ -5,8 +5,8 @@ use clap::{CommandFactory, Parser, ValueEnum};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use jst_shared::{
-    build_system_prompt, build_user_prompt, CommandEffects, CommandPart, CommandRevision,
-    ServerStatusResponse, TranslateRequest, TranslateResponse,
+    build_system_prompt, build_user_prompt, is_valid_feedback_email, CommandEffects, CommandPart,
+    CommandRevision, FeedbackRequest, ServerStatusResponse, TranslateRequest, TranslateResponse,
 };
 use serde::Serialize;
 use std::fmt;
@@ -27,6 +27,8 @@ const APPLE_TRANSLATION_TIMEOUT: Duration = Duration::from_secs(90);
 const APPLE_STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 const APPLE_HELPER_NAME: &str = "jst-apple-intelligence";
 const APPLE_MODEL_NAME: &str = "Apple Intelligence (on-device)";
+const MAX_FEEDBACK_MESSAGE_BYTES: usize = 2 * 1024;
+const MAX_FEEDBACK_EMAIL_BYTES: usize = 254;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 enum Provider {
@@ -40,7 +42,7 @@ enum Provider {
     name = "jst",
     version,
     about = "Turn plain English into a shell command and run it",
-    after_help = "Examples:\n  jst show the 10 largest files here\n  jst --dry find files larger than 500 MB\n  jst -i remove stopped Docker containers\n  jst --status\n\nUse --dry to preview or -i to review before running."
+    after_help = "Examples:\n  jst show the 10 largest files here\n  jst --dry find files larger than 500 MB\n  jst -i remove stopped Docker containers\n  jst --status\n  jst --feedback\n\nUse --dry to preview or -i to review before running."
 )]
 struct Cli {
     /// Skip all safety confirmations
@@ -63,8 +65,12 @@ struct Cli {
     #[arg(long, value_enum, env = "JST_PROVIDER", default_value_t)]
     provider: Provider,
 
+    /// Send feedback to the JST maintainer
+    #[arg(long, conflicts_with_all = ["yolo", "interactive", "dry", "status", "prompt"])]
+    feedback: bool,
+
     /// What you want to do, in plain English
-    #[arg(required_unless_present = "status", num_args = 1.., trailing_var_arg = true)]
+    #[arg(required_unless_present_any = ["status", "feedback"], num_args = 1.., trailing_var_arg = true)]
     prompt: Vec<String>,
 }
 
@@ -126,6 +132,9 @@ async fn run() -> Result<(), JstError> {
     }
 
     let cli = Cli::parse();
+    if cli.feedback {
+        return run_feedback().await;
+    }
     if cli.status {
         return match cli.provider {
             Provider::Server => print_server_status(&fetch_server_status().await?),
@@ -183,6 +192,80 @@ async fn run() -> Result<(), JstError> {
     }
 
     execute_command(&command)
+}
+
+async fn run_feedback() -> Result<(), JstError> {
+    if !io::stdin().is_terminal() {
+        return Err(JstError::Other(
+            "feedback requires an interactive terminal".to_string(),
+        ));
+    }
+
+    let message = loop {
+        match read_interactive_input(
+            "What would you like us to know? ",
+            MAX_FEEDBACK_MESSAGE_BYTES,
+            "",
+        )? {
+            InteractiveInput::Submitted(message) if !message.trim().is_empty() => {
+                break message.trim().to_string();
+            }
+            InteractiveInput::Submitted(_) => eprintln!("Feedback cannot be empty."),
+            InteractiveInput::Cancelled | InteractiveInput::Interrupted => {
+                eprintln!("Feedback cancelled.");
+                return Ok(());
+            }
+        }
+    };
+
+    let email = loop {
+        match read_interactive_input(
+            "Email (optional — press Enter to stay anonymous): ",
+            MAX_FEEDBACK_EMAIL_BYTES,
+            "",
+        )? {
+            InteractiveInput::Submitted(value) => {
+                let value = value.trim();
+                if value.is_empty() {
+                    break None;
+                }
+                if is_valid_feedback_email(value) {
+                    break Some(value.to_string());
+                }
+                eprintln!("Please enter a valid email address, or press Enter to stay anonymous.");
+            }
+            InteractiveInput::Cancelled | InteractiveInput::Interrupted => {
+                eprintln!("Feedback cancelled.");
+                return Ok(());
+            }
+        }
+    };
+
+    send_feedback(&FeedbackRequest { message, email }).await?;
+    eprintln!("Thanks — your feedback was sent.");
+    Ok(())
+}
+
+async fn send_feedback(request: &FeedbackRequest) -> Result<(), JstError> {
+    let api_url = std::env::var("JST_API_URL").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+    let feedback_url = std::env::var("JST_FEEDBACK_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .map(Ok)
+        .unwrap_or_else(|| sibling_url_for(&api_url, "feedback"))?;
+    let installation_id =
+        installation::installation_id().map_err(|error| JstError::Other(format!("{error}")))?;
+    let response = http_client(Duration::from_secs(10))?
+        .post(feedback_url)
+        .header(INSTALLATION_ID_HEADER, installation_id)
+        .json(request)
+        .send()
+        .await
+        .map_err(|_| JstError::Network)?;
+    if !response.status().is_success() {
+        return Err(JstError::Server(response.status().as_u16()));
+    }
+    Ok(())
 }
 
 async fn translate_with_spinner(
@@ -573,6 +656,10 @@ fn http_client(timeout: Duration) -> Result<reqwest::Client, JstError> {
 }
 
 fn status_url_for(api_url: &str) -> Result<String, JstError> {
+    sibling_url_for(api_url, "status")
+}
+
+fn sibling_url_for(api_url: &str, endpoint: &str) -> Result<String, JstError> {
     let mut url = reqwest::Url::parse(api_url)
         .map_err(|_| JstError::Other("JST_API_URL is not a valid URL".to_string()))?;
     let path = url.path().trim_end_matches('/');
@@ -583,9 +670,9 @@ fn status_url_for(api_url: &str) -> Result<String, JstError> {
         )
     })?;
     let status_path = if base.is_empty() {
-        "/status".to_string()
+        format!("/{endpoint}")
     } else {
-        format!("{base}/status")
+        format!("{base}/{endpoint}")
     };
     url.set_path(&status_path);
     url.set_query(None);
@@ -1526,8 +1613,9 @@ mod tests {
         format_detailed_explanation, format_edit_prompt, format_error, format_proposal_explanation,
         format_review_prompt, format_server_status, format_warning, helper_error_message,
         indent_wrapped, macos_major_version, next_char_end, parse_review_action,
-        previous_char_start, read_limited_stream, should_confirm, status_url_for, terminal_safe,
-        validate_apple_response, Cli, JstError, ProposalKind, Provider, ReviewAction,
+        previous_char_start, read_limited_stream, should_confirm, sibling_url_for, status_url_for,
+        terminal_safe, validate_apple_response, Cli, JstError, ProposalKind, Provider,
+        ReviewAction,
     };
     use clap::{error::ErrorKind, CommandFactory, Parser};
     use jst_shared::{
@@ -1610,6 +1698,7 @@ mod tests {
         assert!(!cli.interactive);
         assert!(!cli.dry);
         assert!(!cli.status);
+        assert!(!cli.feedback);
     }
 
     #[test]
@@ -1670,6 +1759,8 @@ mod tests {
         assert!(output.contains("Examples:"));
         assert!(output.contains("jst show the 10 largest files here"));
         assert!(output.contains("jst --status"));
+        assert!(output.contains("jst --feedback"));
+        assert!(output.contains("--feedback"));
         assert!(output.contains("Use --dry to preview or -i to review before running."));
     }
 
@@ -1703,6 +1794,19 @@ mod tests {
     }
 
     #[test]
+    fn accepts_feedback_without_a_prompt_and_rejects_conflicts() {
+        let cli = Cli::try_parse_from(["jst", "--feedback"]).expect("feedback is standalone");
+        assert!(cli.feedback);
+        assert!(cli.prompt.is_empty());
+
+        assert!(Cli::try_parse_from(["jst", "--feedback", "some", "text"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--feedback", "--dry"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--feedback", "--interactive"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--feedback", "--yolo"]).is_err());
+        assert!(Cli::try_parse_from(["jst", "--feedback", "--status"]).is_err());
+    }
+
+    #[test]
     fn derives_status_endpoint_beside_translate_endpoint() {
         assert_eq!(
             status_url_for("https://example.com/translate").unwrap(),
@@ -1713,6 +1817,10 @@ mod tests {
             "http://localhost:8080/api/status"
         );
         assert!(status_url_for("https://example.com/custom").is_err());
+        assert_eq!(
+            sibling_url_for("https://example.com/translate", "feedback").unwrap(),
+            "https://example.com/feedback"
+        );
     }
 
     #[test]
