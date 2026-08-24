@@ -406,7 +406,7 @@ fn parse_command_counts(
         return Err("stats store returned malformed command scores".into());
     }
     let mut commands = Vec::with_capacity(scores.len() / 2);
-    for pair in scores.chunks_exact(2) {
+    for pair in scores.as_chunks::<2>().0 {
         let (Some(command), Some(count)) = (pair[0].as_str(), value_as_u64(&pair[1])) else {
             return Err("stats store returned malformed command scores".into());
         };
