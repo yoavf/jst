@@ -1,6 +1,5 @@
 import { JST_HELP, JST_VERSION, parseJstInvocation } from "./assets/demo-cli.js";
 import { isAllowedDemoCommand } from "./assets/demo-command-v6.js";
-import { publicStatsDays, statsTotalSizeStep } from "./stats-display.js?v=3";
 import { createReminderCopyState } from "./reminder-copy-state.js?v=1";
 
 const examples = [
@@ -1233,32 +1232,11 @@ window.addEventListener("pagehide", () => {
 const STATS_URL = "https://jst-server.fly.dev/stats";
 const STATS_REFRESH_INTERVAL_MS = 60_000;
 const MAX_COMMAND_BARS = 10;
-const LIVE_STATS_START_DATE = "2026-08-16";
-const PRELAUNCH_DAILY_STATS = [
-  { date: "2026-08-10", count: 56 },
-  { date: "2026-08-11", count: 42 },
-  { date: "2026-08-12", count: 95 },
-  { date: "2026-08-13", count: 143 },
-  { date: "2026-08-14", count: 6 },
-  { date: "2026-08-15", count: 1 },
-];
-const MONTH_NAMES = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
 const statsSection = document.querySelector(".stats");
-const statsTotalElement = document.querySelector("#stats-total");
 const commandBarsElement = document.querySelector("#command-bars");
-const dayBarsElement = document.querySelector("#day-bars");
 
 function formatNumber(value) {
   return new Intl.NumberFormat("en-US").format(value);
-}
-
-function formatRangeDay(date) {
-  const [year, month, day] = date.split("-").map(Number);
-  return `${MONTH_NAMES[month - 1]} ${day}, ’${String(year).slice(-2)}`;
 }
 
 function renderCommandBar({ command, count }, index, max) {
@@ -1291,47 +1269,15 @@ function renderCommandBar({ command, count }, index, max) {
   return item;
 }
 
-function renderDayBar({ date, count }, index, days, max) {
-  const bar = document.createElement("span");
-  bar.className = "day-bar";
-  if (index === days.length - 1) bar.classList.add("day-bar--today");
-  bar.style.setProperty("--value", `${(count / max) * 100}%`);
-  const tooltip = `${formatRangeDay(date)} · ${formatNumber(count)} ${count === 1 ? "query" : "queries"}`;
-  bar.dataset.tooltip = tooltip;
-  bar.setAttribute("role", "listitem");
-  bar.setAttribute("aria-label", tooltip);
-  bar.tabIndex = 0;
-  return bar;
-}
-
 async function loadStats() {
   const response = await fetch(STATS_URL);
   if (!response.ok) throw new Error(`stats returned ${response.status}`);
   const stats = await response.json();
 
-  const formattedTotal = formatNumber(stats.total);
-  statsTotalElement.textContent = formattedTotal;
-  statsTotalElement.dataset.sizeStep = statsTotalSizeStep(formattedTotal);
-
   const top = (stats.top_commands || []).slice(0, MAX_COMMAND_BARS);
   if (top.length > 0) {
     commandBarsElement.replaceChildren(
       ...top.map((entry, index) => renderCommandBar(entry, index, top[0].count)),
-    );
-  }
-
-  const allDays = publicStatsDays(
-    stats.daily || [],
-    LIVE_STATS_START_DATE,
-    PRELAUNCH_DAILY_STATS,
-  );
-  const firstActiveDay = allDays.findIndex((day) => day.count > 0);
-  const daysSinceLaunch = firstActiveDay === -1 ? allDays : allDays.slice(firstActiveDay);
-  const days = daysSinceLaunch.slice(-30);
-  if (days.length > 0) {
-    const max = Math.max(...days.map((day) => day.count), 1);
-    dayBarsElement.replaceChildren(
-      ...days.map((day, index) => renderDayBar(day, index, days, max)),
     );
   }
 

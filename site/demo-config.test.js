@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import viteConfig from "../vite.config.js";
-import { publicStatsDays, statsTotalSizeStep } from "../docs/stats-display.js";
 
 const [pageScript, pageStyles, runtimeBundle, sandboxBundle, sandboxMarkup] =
   await Promise.all([
@@ -72,49 +71,6 @@ test("hides the example switcher whenever the demo dialog is open", () => {
   assert.match(
     pageStyles,
     /\.demo-dialog \.another-example\s*{\s*display: none;\s*}/,
-  );
-});
-
-test("shrinks the stats tally after four digits with a readable floor", () => {
-  assert.equal(statsTotalSizeStep("9,999"), 0);
-  assert.equal(statsTotalSizeStep("10,000"), 1);
-  assert.equal(statsTotalSizeStep("999,999"), 2);
-  assert.equal(statsTotalSizeStep("1,000,000"), 3);
-  assert.equal(statsTotalSizeStep("99,999,999"), 4);
-  assert.equal(statsTotalSizeStep("1,000,000,000"), 5);
-  assert.equal(statsTotalSizeStep("18,446,744,073,709,551,615"), 5);
-});
-
-test("public stats chart begins at its published start date", () => {
-  assert.deepEqual(
-    publicStatsDays(
-      [
-        { date: "2026-08-15", count: 3 },
-        { date: "2026-08-16", count: 5 },
-        { date: "2026-08-17", count: 8 },
-      ],
-      "2026-08-16",
-      [
-        { date: "2026-08-10", count: 2 },
-        { date: "2026-08-15", count: 3 },
-      ],
-    ),
-    [
-      { date: "2026-08-10", count: 2 },
-      { date: "2026-08-15", count: 3 },
-      { date: "2026-08-16", count: 5 },
-      { date: "2026-08-17", count: 8 },
-    ],
-  );
-});
-
-test("pre-launch stats preserve every historical query", () => {
-  const prelaunch = pageScript.matchAll(
-    /date: "2026-08-1[0-5]", count: (\d+)/g,
-  );
-  assert.equal(
-    [...prelaunch].reduce((total, match) => total + Number(match[1]), 0),
-    343,
   );
 });
 
