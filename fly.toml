@@ -4,6 +4,11 @@ kill_timeout = "30s"
 
 [build]
 
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "256mb"
+
 [http_service]
   internal_port = 8080
   force_https = true
