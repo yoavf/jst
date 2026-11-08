@@ -29,9 +29,11 @@ The output must not already exist. Every record is flushed so a failed or
 budget-limited run leaves usable partial evidence. The JSONL includes case
 labels, full upstream payloads/responses, resolved model versions, probabilities,
 errors, local warnings, simulated policy outcomes, and a final summary. It does
-not contain authorization headers. Provider outputs can contain untrusted text;
-inspect JSON as data, never pipe commands to a shell. Do not add real credentials
-or private customer data to cases.
+not contain authorization headers. HTTP-error and non-JSON response bodies are
+saved as JSON-escaped `error_body` text, capped at 4,096 Unicode characters after
+redacting the configured key; these bodies are never printed to the terminal.
+Provider outputs can contain untrusted text; inspect JSON as data, never pipe
+commands to a shell. Do not add real credentials or private customer data to cases.
 
 Options:
 
