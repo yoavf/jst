@@ -12,6 +12,10 @@ assessment. Generated shell commands should still be reviewed as shell
 programs, and the review prompt below keeps that judgment visible and easy to
 improve.
 
+For a budget-capped comparison with an independent Jev safety checker, including
+frozen command labels and unchanged local-rule replay, use the
+[decision-model benchmark](../../cli/examples/benchmark_decisions.md).
+
 ## Run it
 
 Export an OpenRouter key, then pass one or more model IDs after `--`:
