@@ -28,3 +28,6 @@ node_modules/
 *~
 .vscode/
 .idea/
+
+# Local orb portal metadata
+.amp/portals/*

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+echo "==> Checking system build dependencies"
+started=$SECONDS
+missing=()
+for package in build-essential pkg-config ca-certificates curl; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+    missing+=("$package")
+  fi
+done
+if ((${#missing[@]})); then
+  sudo apt-get update
+  sudo apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+echo "System dependencies ready ($((SECONDS - started))s)"
+
+echo "==> Preparing Rust stable, rustfmt, and Clippy (matching CI)"
+started=$SECONDS
+export PATH="$HOME/.cargo/bin:$PATH"
+if ! command -v rustup >/dev/null; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y --profile minimal --default-toolchain stable --component rustfmt,clippy --no-modify-path
+fi
+if ! rustup run stable rustc --version >/dev/null 2>&1; then
+  rustup toolchain install stable --profile minimal
+fi
+if ! rustup run stable cargo fmt --version >/dev/null 2>&1; then
+  rustup component add --toolchain stable rustfmt
+fi
+if ! rustup run stable cargo clippy --version >/dev/null 2>&1; then
+  rustup component add --toolchain stable clippy
+fi
+rustup default stable
+
+# Amp and supervised services use new login shells, not this setup process.
+profile_marker='# JST orb Rust environment'
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<'PROFILE'
+
+# JST orb Rust environment
+if [ -f "$HOME/.cargo/env" ]; then
+  . "$HOME/.cargo/env"
+fi
+PROFILE
+fi
+rustc --version
+echo "Rust ready ($((SECONDS - started))s)"
+
+echo "==> Installing locked website dependencies (Node.js is supplied by the orb)"
+started=$SECONDS
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (!(major === 20 && minor >= 19 || major === 22 && minor >= 12 || major > 22)) { throw new Error("Vite requires Node.js 20.19+ or 22.12+"); }'
+npm ci --prefer-offline --no-audit --no-fund
+echo "Website dependencies ready ($((SECONDS - started))s)"
+
+echo "==> Building the locked Rust workspace, tests, and examples for the snapshot"
+started=$SECONDS
+cargo build --workspace --all-targets --locked
+echo "Workspace ready ($((SECONDS - started))s)"

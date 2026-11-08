@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# No credentials or background services are required for local builds/tests.
+# Dependencies belong in setup so waking an orb never downloads packages.
+cargo --version
+rustc --version
+node --version
+test -d node_modules

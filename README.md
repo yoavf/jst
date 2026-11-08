@@ -319,6 +319,14 @@ JST is useful to you, these may be worth exploring too:
 GitHub Actions runs formatting, build, tests, and Clippy on every pull request
 and push to `main`.
 
+Amp orbs run `.agents/setup` to install Rust stable with rustfmt and Clippy,
+install the locked npm dependencies using the orb's Node.js, and prebuild all
+Rust workspace targets for reuse in the project snapshot. `.agents/resume`
+only checks the restored tools and dependencies; it does not install packages
+or start services. Builds and tests need no provider credentials. Running model
+requests still needs the provider configuration described above. The Apple
+Intelligence helper requires macOS and cannot be built in a Linux orb.
+
 ```sh
 cargo test --workspace
 cargo build --workspace
